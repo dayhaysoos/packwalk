@@ -23,8 +23,8 @@ does not initiate a Codex turn.
 The first slice starts after at least one ordinary Codex TUI is running. It
 discovers one exact session from the strongest supported local persisted
 evidence, records a minimal content-free current view, exposes that view
-through the daemon's public session surface, and displays it in an OpenTUI
-client.
+through the daemon's public session surface, and displays it in a plain
+command-line view.
 
 The view includes project, exact session identity, supported activity,
 evidence source, and freshness. A bounded poll detects later persisted Codex
@@ -44,12 +44,14 @@ PackWalk retains structural metadata only. Prompts, responses, command output,
 diff content, terminal input, credentials, environment snapshots, and raw
 Codex payloads are excluded from durable state, logs, and public contracts.
 
-## Clients and portability
+## Interface and portability
 
-The initial interactive client is a lightweight terminal view, not a permanent
-full-screen dashboard. Plain-text and JSON clients follow through the same
-daemon surface. Windows, macOS, and Linux portability is considered in every
-slice rather than deferred to final packaging.
+The human interface is a plain Node.js CLI. It may refresh its own lines after
+a polling update, but it does not use an alternate screen, a terminal UI
+framework, native UI bindings, or experimental runtime flags. Later one-shot
+text and JSON commands consume the same daemon surface. Windows, macOS, and
+Linux portability is considered in every slice rather than deferred to final
+packaging.
 
 ## Later work
 

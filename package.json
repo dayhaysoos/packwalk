@@ -1,0 +1,36 @@
+{
+  "name": "packwalk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Truthful local orientation for already-running Codex sessions",
+  "type": "module",
+  "bin": {
+    "packwalk": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "lint": "oxlint src test",
+    "packwalk": "npm run build --silent && node dist/cli.js",
+    "test": "vitest run --exclude test/real-codex.integration.test.ts",
+    "test:real-codex": "vitest run test/real-codex.integration.test.ts --testTimeout=120000",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify": "npm run test && npm run typecheck && npm run lint && npm run build"
+  },
+  "engines": {
+    "node": "26.5.0",
+    "npm": "11.17.0"
+  },
+  "packageManager": "npm@11.17.0",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.99",
+    "effect": "4.0.0-beta.99"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.99",
+    "@types/node": "26.1.1",
+    "oxlint": "1.74.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

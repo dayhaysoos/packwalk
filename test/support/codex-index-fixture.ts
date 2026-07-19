@@ -1,0 +1,92 @@
+import { DatabaseSync } from "node:sqlite"
+
+import { Effect } from "effect"
+
+import { SessionSourceError } from "../../src/application/session-source.js"
+
+export interface CodexIndexFixture {
+  readonly sessionId: string
+  readonly projectIdentity: string
+  readonly sourceUpdatedAtMs: number
+  readonly forbiddenContent: string
+}
+
+const fixtureError = () =>
+  new SessionSourceError({
+    code: "unavailable",
+    message: "Codex persisted evidence is unavailable or incompatible",
+  })
+
+export const createCodexIndexFixture = Effect.fn("CodexIndexFixture.create")(
+  function* (path: string, fixture: CodexIndexFixture) {
+    yield* Effect.try({
+      try: () => {
+        const database = new DatabaseSync(path, {
+          allowExtension: false,
+          defensive: true,
+          readBigInts: false,
+        })
+        try {
+          database.exec(`
+            CREATE TABLE threads (
+              id TEXT PRIMARY KEY,
+              cwd TEXT NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              archived INTEGER NOT NULL,
+              thread_source TEXT NOT NULL,
+              title TEXT,
+              first_user_message TEXT,
+              preview TEXT
+            )
+          `)
+          database
+            .prepare(`
+              INSERT INTO threads (
+                id,
+                cwd,
+                updated_at_ms,
+                archived,
+                thread_source,
+                title,
+                first_user_message,
+                preview
+              ) VALUES (?, ?, ?, 0, 'user', ?, ?, ?)
+            `)
+            .run(
+              fixture.sessionId,
+              fixture.projectIdentity,
+              fixture.sourceUpdatedAtMs,
+              fixture.forbiddenContent,
+              fixture.forbiddenContent,
+              fixture.forbiddenContent,
+            )
+        } finally {
+          database.close()
+        }
+      },
+      catch: fixtureError,
+    })
+  },
+)
+
+export const updateCodexIndexFixture = Effect.fn("CodexIndexFixture.update")(
+  function* (path: string, sessionId: string, sourceUpdatedAtMs: number) {
+    yield* Effect.try({
+      try: () => {
+        const database = new DatabaseSync(path, {
+          allowExtension: false,
+          defensive: true,
+          readBigInts: false,
+        })
+        try {
+          database
+            .prepare("UPDATE threads SET updated_at_ms = ? WHERE id = ?")
+            .run(sourceUpdatedAtMs, sessionId)
+        } finally {
+          database.close()
+        }
+      },
+      catch: fixtureError,
+    })
+  },
+)

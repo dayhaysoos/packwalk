@@ -1,0 +1,46 @@
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { Context, Effect, Layer } from "effect"
+
+import {
+  prepareRuntimeDirectories,
+  RuntimePaths,
+  runtimePathsLayer,
+} from "./adapters/runtime-paths.js"
+import {
+  codexSourceLayer,
+  layer as sqliteSessionStorageLayer,
+} from "./adapters/sqlite-session-storage.js"
+import {
+  sessionDaemonLayerFromServer,
+  Service as SessionDaemon,
+} from "./daemon/session-runtime.js"
+import { claimSessionDaemonEndpoint } from "./daemon/endpoint-ownership.js"
+
+const daemonProgram = Effect.scoped(
+  Effect.gen(function* () {
+    const paths = yield* RuntimePaths
+    yield* prepareRuntimeDirectories
+
+    const endpointClaim = yield* claimSessionDaemonEndpoint(paths.ipcEndpoint)
+    if (endpointClaim._tag === "AlreadyRunning") {
+      return
+    }
+
+    const dependencies = Layer.mergeAll(
+      codexSourceLayer(paths.codexDatabasePath),
+      sqliteSessionStorageLayer(paths.packWalkDatabasePath),
+    )
+    const daemonContext = yield* Layer.build(
+      sessionDaemonLayerFromServer(endpointClaim.server).pipe(
+        Layer.provide(dependencies),
+      ),
+    )
+    const daemon = Context.get(daemonContext, SessionDaemon)
+    return yield* daemon.lifetime
+  }),
+)
+
+daemonProgram.pipe(
+  Effect.provide(Layer.merge(NodeServices.layer, runtimePathsLayer)),
+  NodeRuntime.runMain({ disableErrorReporting: true }),
+)

@@ -12,7 +12,7 @@ sessions overlap, share a repository, or have duplicate display labels.
 ## Acceptance criteria
 
 - [ ] At least two concurrently discoverable sessions appear as distinct rows
-      through the daemon surface and OpenTUI view.
+      through the daemon surface and CLI view.
 - [ ] Two sessions in one repository remain distinct by exact Codex identity;
       project paths and human labels are not used as session identity.
 - [ ] A polling change for one session cannot alter another session's activity,

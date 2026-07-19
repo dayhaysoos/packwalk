@@ -24,7 +24,7 @@ discovers an ordinary already-running Codex session from the strongest
 supported local persisted evidence, validates and normalizes that evidence,
 commits a content-light representation to PackWalk's SQLite database, exposes
 the resulting session view through the daemon's public session query/event
-surface, and renders it in an isolated OpenTUI client.
+surface, and renders it in a plain command-line view.
 
 The client shows project, exact Codex session identity, supported activity,
 evidence source, and freshness. A bounded poller detects later persisted Codex
@@ -54,9 +54,9 @@ qualification campaign or alter the assistance-only product boundary.
 12. As a developer, I want multiple overlapping Codex sessions to remain distinct, so that activity from one session never appears under another.
 13. As a developer, I want multiple sessions in one repository to remain distinct, so that project identity does not replace session identity.
 14. As a developer, I want PackWalk state to survive daemon restart, so that reconnecting a client does not erase the machine-wide overview.
-15. As a developer, I want an interactive terminal view that does not own supervision, so that closing the client cannot affect Codex or the daemon's durable state.
-16. As a script author, I want the same session view in machine-readable form without initializing OpenTUI, so that automation can use the product safely.
-17. As a screen-reader or minimal-terminal user, I want a plain-text equivalent of the interactive view, so that renderer availability is not the only access path.
+15. As a developer, I want a plain CLI view that does not own supervision, so that closing it cannot affect Codex or the daemon's durable state.
+16. As a script author, I want the same session view in machine-readable form, so that automation can use the product safely.
+17. As a screen-reader or minimal-terminal user, I want a one-shot text view, so that a continuously refreshing display is not the only access path.
 18. As a privacy-conscious developer, I want PackWalk to retain only structural metadata, so that its database and backups do not become a second transcript archive.
 19. As a privacy-conscious developer, I want prompts, responses, command output, diffs, terminal input, and raw Codex payloads excluded from storage and logs, so that observation does not create unnecessary sensitive copies.
 20. As a developer, I want one-session deletion and a complete local-data clear, so that PackWalk-controlled state can be removed without deleting or interrupting Codex work.
@@ -82,9 +82,9 @@ qualification campaign or alter the assistance-only product boundary.
 - Effect v4 is the sole application orchestration and effect runtime. It owns services, Layers, scopes, fibers, cancellation, queues, streams, scheduling, configuration, logging, and test infrastructure. The exact compatible Effect v4 cohort is pinned without floating ranges.
 - Before Effect implementation begins, Kit Langton's Effect skill is installed project-locally, its upstream revision is recorded, and the committed project guidance is subordinate to repository rules and the project-pinned Effect source.
 - Effect Schema v4 is the sole application runtime validation, decoding, and encoding authority for Codex-normalized facts, database rows, commands, events, IPC, view models, and public errors. No second validation ecosystem is introduced.
-- The TypeScript toolchain runs only on Node.js; Bun is prohibited in development, CI, testing, packaging, and production. Dependency initialization selects and exactly pins a Node patch that satisfies the selected OpenTUI and `node:sqlite` versions. Reintroducing OpenTUI means the renderer's qualified Node requirement, rather than the earlier CLI-only floor, controls that exact selection.
-- OpenTUI is isolated to an explicit interactive client. OpenTUI types and any required FFI flag do not enter the daemon, Codex adapter, storage, domain core, IPC service, or noninteractive CLI. Closing or crashing the renderer does not affect supervision.
-- The initial OpenTUI experience is a lightweight terminal client, not a product requirement for a persistent full-screen dashboard. Plain-text and JSON clients consume the same daemon view model without constructing the renderer.
+- The TypeScript toolchain runs only on Node.js; Bun is prohibited in development, CI, testing, packaging, and production. Dependency initialization selects and exactly pins a Node patch that satisfies `node:sqlite` and the verified Effect v4 cohort.
+- The human-facing client is a plain Node.js CLI. It may refresh its own lines after committed polling updates, but it does not use an alternate screen, a terminal UI framework, native UI bindings, or experimental runtime flags. Closing or crashing the CLI does not affect supervision.
+- Later one-shot text and JSON clients consume the same daemon view model as the refreshing CLI.
 - The daemon is the sole domain writer and owns the authoritative PackWalk commit sequence. Clients send queries or commands and never write SQLite or reduce Codex facts themselves.
 - The daemon starts on demand when a client needs it and persists after clients exit. Initial delivery does not install launchd, systemd, Windows Service, or login-start integration.
 - The daemon exposes one public session query/event surface. It returns a current snapshot and committed updates using Effect-Schema-validated contracts. This is the primary external test seam.
@@ -106,15 +106,15 @@ qualification campaign or alter the assistance-only product boundary.
 
 ## Testing Decisions
 
-- Tests assert external behavior at the daemon's public session query/event surface. They do not reach into reducers, repositories, queues, or renderer internals merely because those units exist.
+- Tests assert external behavior at the daemon's public session query/event surface. They do not reach into reducers, repositories, queues, or presentation internals merely because those units exist.
 - Deterministic session sources drive the public daemon seam with fixed identities, persisted snapshots, changes, duplicates, malformed rows, missing evidence, and source loss. The same assertions are reused for real Codex where practical.
 - The first vertical slice proves that an ordinary Codex TUI starts first, PackWalk starts independently afterward, a real persisted session is discovered, and later Codex activity becomes a visibly polled committed update.
 - A real-Codex integration test must demonstrate that discovery neither creates nor resumes a thread, starts a turn, restarts Codex, changes the originating TUI, or requires `--remote`.
 - Schema contract tests cover every persisted and IPC-crossing tagged state, unknown variants, version mismatch, redacted errors, and forbidden raw fields.
 - Storage tests exercise transaction rollback, constraint enforcement, lock contention, busy-timeout exhaustion, large integers, migration failure, abrupt process termination, and publish-after-commit ordering through repository behavior.
 - IPC integration tests use real Unix-domain sockets and Windows named pipes as platform-appropriate, exercising daemon unavailable, reconnect, snapshot-plus-events, bounded framing, slow consumers, and clean shutdown.
-- OpenTUI tests consume only PackWalk view models and a fake client port. Renderer startup, update, exit, exception cleanup, terminal restoration, resize, keyboard-only navigation, non-TTY behavior, `TERM=dumb`, and color-disabled output are tested at the client boundary.
-- Plain-text and JSON output tests prove they do not import or initialize OpenTUI or require FFI flags.
+- CLI presentation tests consume only PackWalk view models and a fake client port. Startup, update, exit, exception cleanup, terminal restoration, non-TTY behavior, `TERM=dumb`, and color-disabled output are tested at the client boundary.
+- One-shot text and JSON output tests prove they require no native UI library or experimental runtime flags.
 - Multi-session acceptance uses at least two overlapping Codex sessions and proves exact identity isolation, including two sessions in one repository and duplicate display labels where practical.
 - Restart tests prove SQLite authority, monotonic PackWalk commit ordering, snapshot restoration, explicit stale/uncertain states, and no invented replay.
 - Privacy tests feed sensitive-shaped synthetic fields and assert that prohibited content cannot cross schemas into storage, logs, diagnostics, IPC views, backups, or deletion remnants.
@@ -131,7 +131,7 @@ qualification campaign or alter the assistance-only product boundary.
 - A provider registry, provider plugins, support for non-Codex agents, or generic cross-provider semantics.
 - Transcript parsing as an unlabelled trusted source, raw-provider persistence, rich optional content capture, searchable transcript history, or secret-completeness claims.
 - Remote clients, public listeners, tunnels, accounts, multi-user authorization, delegated approval, or cryptographic capability protocols.
-- A persistent full-screen dashboard, village renderer, editor extension, browser client, mobile client, or public SDK.
+- A persistent dashboard, terminal UI framework, editor extension, browser client, mobile client, or public SDK.
 - Operating-system notifications, login-start services, detailed installer UX, standalone executable packaging, signing, and notarization.
 - Consequential-action implementation, action dispatch qualification, and adoption of Effect Workflow.
 - Reviving superseded wrapper or relay qualification work, creating a new qualification harness, or reopening the resolved post-launch product boundary.
@@ -139,6 +139,7 @@ qualification campaign or alter the assistance-only product boundary.
 ## Further Notes
 
 - [ADR 0001](../../docs/adr/0001-require-post-launch-attachment.md) is authoritative for the product boundary. Superseded wrapper and relay artifacts are historical evidence only; they are not implementation requirements, release gates, or blockers.
+- [ADR 0002](../../docs/adr/0002-use-a-plain-command-line-interface.md) is authoritative for the CLI-only interface boundary and records why the initial public specification was corrected.
 - Exact dependency versions are selected during initialization, pinned in the manifest and lockfile, and upgraded only through deliberate qualification.
 - The daemon public session query/event surface is approved as the primary seam unless implementation reveals an actual repository contradiction. No such contradiction exists in the current corrected repository.
 - The first ticket must remain visibly demoable even though the repository currently has no production TypeScript. It therefore establishes only the minimum end-to-end skeleton needed for one real polled session and leaves breadth, hardening, and release engineering to later tracer bullets.

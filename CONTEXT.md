@@ -40,6 +40,11 @@ PackWalk's current content-free representation of one session identity,
 project, supported activity, evidence source, and freshness.
 _Avoid_: Transcript, raw provider record
 
+**Plain CLI view**:
+PackWalk's human-readable command-line presentation of a session view. It may
+refresh its own lines after polling, but it remains ordinary terminal output.
+_Avoid_: Dashboard, alternate-screen terminal application
+
 **Supported activity**:
 The strongest structural activity claim justified by the available evidence.
 Unsupported detail is unavailable rather than inferred.
@@ -50,8 +55,10 @@ The named local mechanism from which a PackWalk claim was established.
 _Avoid_: Proof, authority without qualification
 
 **Freshness**:
-How recently PackWalk obtained the evidence behind a claim and whether that
-evidence remains available.
+Whether the evidence behind the current published view remained available at
+its latest meaningful observation. The observation time records when that
+published revision or state was established; it is not a per-poll heartbeat.
+`fresh` remains valid only while the active poller has not surfaced source loss.
 _Avoid_: Liveness, certainty
 
 **Content-free evidence**:

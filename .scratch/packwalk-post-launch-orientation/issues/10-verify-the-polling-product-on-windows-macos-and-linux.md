@@ -13,12 +13,12 @@ trustworthy live attachment may remain unavailable.
 ## Acceptance criteria
 
 - [ ] Windows, macOS, and Linux each exercise the deterministic daemon,
-      node:sqlite storage, local IPC, OpenTUI, plain-text, and JSON behavior
+      node:sqlite storage, local IPC, refreshing CLI, one-shot text, and JSON behavior
       delivered by the blocking tickets.
 - [ ] Unix-domain socket and Windows named-pipe paths are verified with
       per-user access, reconnect, shutdown, and stale-endpoint behavior.
-- [ ] The supported Node patch, exact Effect cohort, OpenTUI renderer/native
-      requirements, and Bun-free commands are recorded for every platform.
+- [ ] The supported Node patch, exact Effect cohort, and Bun-free commands are
+      recorded for every platform.
 - [ ] The polling view, history, deletion, restart, backup/upgrade, and failed
       commit behavior have equivalent user-visible semantics on all three
       operating systems.
