@@ -104,6 +104,12 @@ runtime conclusion is unavailable. Persisted evidence remains `discovered` or
 `polled`; production `watched` status and direct control remain unavailable.
 This human-only check does not block Tickets 03–10.
 
+Final Ticket 02 review is clean with zero Standards and zero Specification
+findings. Independent product preflight reports `NEEDS HUMAN EVIDENCE`: no
+product failure was established, and every safe check was exhausted. The only
+remaining evidence is the maintainer-started default-TUI snapshot documented in
+the ticket. No production code or `watched` state was added.
+
 ## Reproduce
 
 Use the exact versions pinned by the repository:
@@ -151,10 +157,10 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Review and preflight the bounded Ticket 02 pending-evidence report,
-   isolating its one remaining ordinary-TUI topology check.
-2. Continue with Tickets 03–10 in dependency order while that non-blocking
-   human evidence remains open, including a
+1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
+   human evidence.
+2. Continue with Ticket 03 and then Tickets 04–10 in dependency order,
+   including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check

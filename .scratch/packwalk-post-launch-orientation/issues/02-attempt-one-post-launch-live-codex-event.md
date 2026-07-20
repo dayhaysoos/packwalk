@@ -99,6 +99,17 @@ or file-change evidence remains polling evidence and cannot produce `watched`
 status. PackWalk must not expose direct control on the strength of static
 schemas or binary symbols alone.
 
+### Remaining human evidence
+
+1. Start exactly one ordinary default `codex` TUI without `--remote`, resume, a
+   wrapper, or a managed app-server; complete one turn and leave it running.
+2. Start PackWalk later with `npm run packwalk` and privately confirm that it
+   shows the same exact session as `DISCOVERED` or `POLLED`, never `WATCHED`.
+3. Run only the allowlisted `ps` and `lsof` snapshot below against that TUI.
+   No named listener completes the bounded negative result for `0.139.0`. If a
+   named listener exists, do not connect or infer identity; leave the result
+   unavailable unless Codex documents a read-only exact-identity handshake.
+
 ### Concrete next options
 
 1. Complete the one human-only default-TUI topology snapshot described above.
@@ -198,3 +209,9 @@ qualification. This macOS result makes no claim about either platform.
   and symbol presence no longer claim runtime wiring, and the pending snapshot
   no longer assumes an endpoint can be correlated without a documented exact-ID
   handshake. Current-state wording now calls this a pending-evidence report.
+- 2026-07-20: The final generic review is clean with zero Standards and zero
+  Specification findings. Independent product preflight reports
+  `NEEDS HUMAN EVIDENCE`, not a product failure: every safe static and
+  structural check passed, but no ordinary default TUI was available. The
+  three-step private snapshot above is the only remaining Ticket 02 evidence.
+  Ticket 02 stays `needs-info` and does not block Tickets 03–10.
