@@ -111,10 +111,10 @@ remaining evidence is the maintainer-started default-TUI snapshot documented in
 the ticket. No production code or `watched` state was added.
 
 [Ticket 03](../.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
-is claimed on `agent/ticket-03-text-json-output` from integration fixed point
-`6c4686dca30466b52db56785ef159348a28a4d1e`. Its implementation is green and
-awaiting independent review. `packwalk text` and `packwalk json` consume exactly
-the same initial public daemon event as the refreshing CLI, emit one
+is resolved on `agent/ticket-03-text-json-output` from integration fixed point
+`6c4686dca30466b52db56785ef159348a28a4d1e` and is ready to integrate.
+`packwalk text` and `packwalk json` consume exactly the same initial public
+daemon event as the refreshing CLI, emit one
 platform-native-line-ended document, and exit without affecting the daemon.
 JSON uses the existing strict, versioned `SessionEvent` schema and preserves an
 explicit tagged unavailable result rather than optional session fields. Direct
@@ -167,8 +167,19 @@ verification passes 19 files and 77 tests plus typecheck, lint, and build.
 Another fresh independent review remains required.
 Fresh generic review pass 8 is clean with zero actionable Standards findings
 and zero Ticket 03 Specification findings across the complete branch through
-`3553d49d97f7428a4928e8102693da81e5a1f2fc`. Independent product preflight is
-the remaining Ticket 03 delivery gate; no maintainer acceptance is claimed.
+`3553d49d97f7428a4928e8102693da81e5a1f2fc`. Independent product preflight was
+then the remaining Ticket 03 delivery gate; no maintainer acceptance was
+claimed by that review.
+Independent product preflight at
+`6493aa8a6bc8ce250b52c8509f366cff9a4d9612` reports `READY FOR MAINTAINER`.
+The exact quiet text and JSON commands passed against the public daemon with
+matching session evidence; invalid usage had deterministic empty stdout, exact
+native-line-ended stderr, and exit 1. Six focused files and 21 tests passed;
+full verification passed 19 files and 77 tests plus typecheck, lint, and build.
+Real product execution was on macOS arm64. Windows and Linux currently have
+deterministic contract evidence, including CRLF and Windows paths with spaces;
+their real CI process evidence belongs to Ticket 10. Ticket 03's agent-owned
+delivery is resolved without claiming personal maintainer acceptance.
 
 ## Reproduce
 
@@ -219,8 +230,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Continue with Ticket 03 and then Tickets 04–10 in dependency order,
-   including a
+2. Integrate resolved Ticket 03, then continue with Tickets 04–10 in dependency
+   order, including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check

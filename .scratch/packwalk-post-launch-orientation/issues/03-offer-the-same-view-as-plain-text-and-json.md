@@ -1,6 +1,6 @@
 # Offer the same view as plain text and JSON
 
-Status: claimed
+Status: resolved
 Blocked by: 01
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -119,3 +119,16 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   complete fixed-point diff through `3553d49d97f7428a4928e8102693da81e5a1f2fc`.
   The independent product preflight is now the remaining delivery gate; no
   maintainer acceptance is claimed.
+- 2026-07-20: Independent product preflight reports `READY FOR MAINTAINER` at
+  `6493aa8a6bc8ce250b52c8509f366cff9a4d9612`. It exercised the exact documented
+  quiet commands through the public daemon surface: text returned one complete
+  six-line `POLLED` view with empty stderr, JSON returned one directly parseable
+  versioned content-free snapshot, and invalid usage returned empty stdout,
+  exact native-line-ended stderr, and exit 1. Six focused Ticket 03 files and
+  21 tests passed; full verification passed 19 files and 77 tests plus
+  typecheck, lint, and build. Explicit unavailable output, CRLF behavior, and a
+  Windows path containing spaces have deterministic coverage. Real execution
+  occurred on macOS arm64; Windows and Linux real-process evidence remains for
+  the accumulated Ticket 10 matrix. That limitation is non-blocking for this
+  ticket. Ticket 03's agent-owned delivery is resolved and ready to integrate;
+  no personal maintainer acceptance is claimed.
