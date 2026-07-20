@@ -336,3 +336,29 @@ sessions overlap, share a repository, or have duplicate display labels.
   stopped and released both; pre-existing v1 PID 77857 remains running and
   untouched. Ticket 04 remains claimed for a wholly fresh generic review;
   product preflight remains paused.
+- 2026-07-20: Fresh generic review pass 9 reports zero actionable
+  Specification findings and one P1 Standards blocker at the v1/v2 storage
+  boundary. A qualified final symlink from `packwalk-v2.sqlite` to
+  `packwalk.sqlite` exists, so import preparation returns early and v2 storage
+  migrates the legacy database in place while its older writer may remain
+  active. Ticket 04 remains claimed while a red regression holds the legacy
+  writer open and the storage adapter rejects physically identical legacy and
+  versioned paths before the early return or any database open. Full
+  verification and wholly fresh generic review follow; product preflight
+  remains paused.
+- 2026-07-20: Pass 9's v1/v2 alias P1 is repaired red-first at the storage
+  boundary. Before the existence early return or any SQLite open, import
+  preparation follows both existing paths and rejects matching native
+  device/inode identity as the redacted storage-open error. The regression
+  keeps the legacy connection open, proves startup fails, and confirms its only
+  table remains `current_session`; the complete storage file passes 13 tests.
+  Full verification and a wholly fresh generic review remain pending; product
+  preflight stays paused.
+- 2026-07-20: Full post-alias verification is green: `npm run verify` passes
+  21 files and 114 tests plus typecheck, lint, and build; the persisted-Codex
+  check passes in 4.12 seconds. Rebuilt JSON and text each exit zero with empty
+  stderr and contain all 19 exact identities; JSON is a protocol-v2
+  `SessionsSnapshot`. Positively identified PID 90906 owned both v2 writer and
+  transport sockets and was stopped cleanly; pre-existing v1 PID 77857 remains
+  running and untouched. Ticket 04 remains claimed for a wholly fresh generic
+  review; product preflight stays paused.

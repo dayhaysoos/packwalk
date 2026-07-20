@@ -5,6 +5,7 @@ import {
   existsSync,
   renameSync,
   rmSync,
+  statSync,
 } from "node:fs"
 import { backup, DatabaseSync } from "node:sqlite"
 
@@ -698,14 +699,35 @@ const inspectImportSnapshot = (path: string) =>
     (database) => Effect.sync(() => database.close()),
   )
 
+const rejectAliasedStoragePaths = (
+  legacyPath: string,
+  currentPath: string,
+) =>
+  Effect.try({
+    try: () => {
+      if (!existsSync(legacyPath) || !existsSync(currentPath)) return
+
+      const legacy = statSync(legacyPath, { bigint: true })
+      const current = statSync(currentPath, { bigint: true })
+      if (
+        legacy.dev === current.dev &&
+        legacy.ino === current.ino
+      ) {
+        throw new Error("Legacy and versioned storage resolve to one file")
+      }
+    },
+    catch: () => storageError("SessionStorage.open"),
+  })
+
 /**
  * Seeds the versioned database from a SQLite-consistent legacy snapshot.
- * The caller must first own the versioned daemon endpoint so only one startup
+ * The caller must first own the versioned database authority so only one startup
  * can perform the missing-database import at a time.
  */
 export const prepareVersionedStorage = Effect.fn(
   "SessionStorage.prepareVersionedStorage",
 )(function* (legacyPath: string, currentPath: string) {
+  yield* rejectAliasedStoragePaths(legacyPath, currentPath)
   if (existsSync(currentPath) || !existsSync(legacyPath)) {
     return
   }

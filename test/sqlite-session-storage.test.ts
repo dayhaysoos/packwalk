@@ -4,13 +4,14 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { Context, Effect, Exit, Fiber, Layer, Result, Scope } from "effect"
 
 import { Service as SessionStorage } from "../src/application/session-storage.js"
 import {
@@ -319,6 +320,47 @@ it.effect("imports legacy state without taking its database away from an older d
     ).toEqual({ observed_at_ms: 9_000 })
     expect(yield* storage.load()).toEqual(imported)
   }),
+)
+
+it.effect.skipIf(process.platform === "win32")(
+  "rejects a versioned database symlink to the active legacy database",
+  () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.sync(() => mkdtempSync(join(tmpdir(), "pw-storage-alias-"))),
+        (path) =>
+          Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+      )
+      const legacyPath = join(directory, "packwalk.sqlite")
+      const currentPath = join(directory, "packwalk-v2.sqlite")
+      yield* Effect.sync(() => {
+        seedLooseSessionTable(legacyPath, validRow)
+        symlinkSync(legacyPath, currentPath, "file")
+      })
+      const legacyWriter = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(legacyPath)),
+        (database) => Effect.sync(() => database.close()),
+      )
+
+      const startup = yield* Effect.result(
+        Effect.gen(function* () {
+          yield* prepareVersionedStorage(legacyPath, currentPath)
+          yield* Layer.build(sqliteSessionStorageLayer(currentPath))
+        }),
+      )
+
+      expect(Result.isFailure(startup)).toBe(true)
+      expect(
+        legacyWriter
+          .prepare(`
+            SELECT name
+            FROM sqlite_schema
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+          `)
+          .all(),
+      ).toEqual([{ name: "current_session" }])
+    }),
 )
 
 it.effect("imports committed legacy WAL state while the old writer remains active", () =>

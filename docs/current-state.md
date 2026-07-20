@@ -403,6 +403,24 @@ Positively identified PID 35013 owned both the durable
 `.pw-Nc6NmXqu-1Q1-LtP` writer socket and v2 `/tmp` transport, then was stopped
 and released both. Pre-existing v1 PID 77857 remains running and untouched.
 Ticket 04 remains claimed for a wholly fresh generic review; product preflight
+remains paused after pass 9 reports zero actionable Specification findings and
+one P1 Standards blocker at the v1/v2 storage boundary. A qualified final
+symlink from `packwalk-v2.sqlite` to `packwalk.sqlite` makes import preparation
+return early, after which v2 storage migrates the legacy database in place
+while its older writer may remain active. A red regression now holds the
+legacy writer open while the storage adapter is changed to reject physically
+identical legacy and versioned paths before the early return or any database
+open. That P1 is now repaired red-first: import preparation follows both
+existing paths and rejects matching native device/inode identity as the
+redacted storage-open error. The regression keeps the legacy connection open,
+proves startup fails, and confirms its only table remains `current_session`;
+the complete storage file passes 13 tests. `npm run verify` passes 21 files and
+114 tests plus typecheck, lint, and build, and the persisted-Codex check passes
+in 4.12 seconds. Rebuilt JSON and text each exited zero with empty stderr and
+returned all 19 exact identities; JSON was a protocol-v2 `SessionsSnapshot`.
+Positively identified PID 90906 owned both v2 writer and transport sockets and
+was stopped cleanly; pre-existing v1 PID 77857 remains running and untouched.
+Ticket 04 remains claimed for a wholly fresh generic review; product preflight
 remains paused.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
