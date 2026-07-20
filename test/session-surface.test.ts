@@ -17,6 +17,10 @@ import {
 } from "./support/deterministic-packwalk.js"
 import { makeDeterministicSessionSurface } from "./support/deterministic-session-surface.js"
 import {
+  runSessionClient,
+  type ClientPort,
+} from "../src/client/session-client.js"
+import {
   CodexPersistedFact,
   encodeSessionProtocolEvent,
   MaximumSessionEventBytes,
@@ -692,6 +696,72 @@ it.effect("rejects incompatible or content-bearing evidence with a redacted publ
   }),
 )
 
+it.effect("surfaces unsupported discovery without dropping the committed overview", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const packWalk = yield* makeDeterministicPackWalk({
+      version: 1,
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 1_000,
+    })
+
+    const initial = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(initial[0]).toMatchObject({
+      _tag: "SessionsSnapshot",
+      views: [{ sessionId, commitSequence: 1 }],
+    })
+
+    yield* packWalk.rejectDiscoveryForTest
+    const rejected = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(rejected).toEqual([{
+      _tag: "SessionsSnapshot",
+      protocolVersion: 3,
+      views: [{
+        protocolVersion: 2,
+        sessionId,
+        projectIdentity: "fixture-project",
+        activity: "persisted Codex activity",
+        evidenceSource: "codex-sqlite-thread-index",
+        state: { _tag: "Discovered" },
+        freshness: "stale",
+        provenance: {
+          _tag: "Retained",
+          reason: "source-unsupported",
+        },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 2_000,
+        commitSequence: 2,
+      }],
+    }])
+
+    yield* packWalk.acceptDiscoveryForTest
+    const recovered = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(recovered[0]).toMatchObject({
+      _tag: "SessionsSnapshot",
+      views: [{
+        sessionId,
+        state: { _tag: "Polled" },
+        freshness: "fresh",
+        provenance: { _tag: "Observed" },
+        observedAtMs: 2_000,
+        commitSequence: 3,
+      }],
+    })
+
+    const repeated = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(repeated).toEqual(recovered)
+  }),
+)
+
 it.effect("recovers startup discovery when a later CLI subscribes after evidence appears", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
@@ -776,6 +846,13 @@ it.effect("does not publish a session update when its authoritative commit fails
 it.effect("restores, degrades, recovers, and reconnects without invented replay", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
+    const renderedFrames = yield* Ref.make<
+      ReadonlyArray<ReadonlyArray<string>>
+    >([])
+    const client: ClientPort = {
+      writeFrame: (lines) =>
+        Ref.update(renderedFrames, (frames) => [...frames, lines]),
+    }
 
     const packWalk = yield* makeRestartableDeterministicPackWalk({
       version: 1,
@@ -787,16 +864,24 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
     yield* packWalk.startDaemonIn(firstScope)
     const firstObserved = yield* Deferred.make<void>()
-    const firstRun = yield* packWalk.events.pipe(
-      Stream.tap(() => Deferred.succeed(firstObserved, undefined)),
-      Stream.take(2),
-      Stream.runCollect,
+    const firstRunEvents = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    const firstRun = yield* runSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(firstRunEvents, (events) => [...events, event]),
+        ),
+        Stream.tap(() => Deferred.succeed(firstObserved, undefined)),
+        Stream.take(2),
+      ),
+      client,
+    ).pipe(
       Effect.forkChild,
     )
 
     yield* Deferred.await(firstObserved)
     yield* TestClock.adjust("1 second")
-    const firstEvents = Array.from(yield* Fiber.join(firstRun))
+    yield* Fiber.join(firstRun)
+    const firstEvents = yield* Ref.get(firstRunEvents)
     expect(firstEvents[1]).toMatchObject({
       _tag: "SessionsUpdated",
       views: [{
@@ -815,10 +900,17 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
     yield* packWalk.startDaemonIn(secondScope)
     const restoredObserved = yield* Deferred.make<void>()
-    const collected = yield* packWalk.events.pipe(
-      Stream.tap(() => Deferred.succeed(restoredObserved, undefined)),
-      Stream.take(3),
-      Stream.runCollect,
+    const secondRunEvents = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    const collected = yield* runSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(secondRunEvents, (events) => [...events, event]),
+        ),
+        Stream.tap(() => Deferred.succeed(restoredObserved, undefined)),
+        Stream.take(3),
+      ),
+      client,
+    ).pipe(
       Effect.forkChild,
     )
     yield* Deferred.await(restoredObserved)
@@ -830,7 +922,8 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     yield* TestClock.adjust("1 second")
     yield* TestClock.adjust("1 second")
 
-    const events = Array.from(yield* Fiber.join(collected))
+    yield* Fiber.join(collected)
+    const events = yield* Ref.get(secondRunEvents)
     expect(events[0]).toMatchObject({
       _tag: "SessionsSnapshot",
       protocolVersion: 3,
@@ -887,9 +980,17 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
       return yield* Effect.die("Expected one committed recovery update")
     }
 
-    const reconnect = Array.from(
-      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    const reconnectEvents = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    yield* runSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(reconnectEvents, (events) => [...events, event]),
+        ),
+        Stream.take(1),
+      ),
+      client,
     )
+    const reconnect = yield* Ref.get(reconnectEvents)
     expect(reconnect).toEqual([
       SessionEvent.cases.SessionsSnapshot.make({
         protocolVersion: 3,
@@ -899,6 +1000,16 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     expect(reconnect[0]).toMatchObject({
       views: [{ commitSequence: 4, observedAtMs: 6_000 }],
     })
+    const frames = yield* Ref.get(renderedFrames)
+    expect(frames).toHaveLength(6)
+    expect(frames[2]).toEqual(frames[1])
+    expect(frames[3]?.join("\n")).toContain(
+      "RETAINED (source-unavailable)",
+    )
+    expect(frames[3]?.join("\n")).toContain("stale")
+    expect(frames[4]?.join("\n")).toContain("OBSERVED")
+    expect(frames[4]?.join("\n")).toContain("fresh")
+    expect(frames[5]).toEqual(frames[4])
     yield* Scope.close(secondScope, Exit.void)
   }),
 )

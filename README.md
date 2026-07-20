@@ -150,9 +150,12 @@ committed structural metadata, marks it `stale`, and shows `RETAINED
 (source-unavailable)` provenance. Rejected or regressed exact evidence is
 retained as `source-unsupported` without merging the rejected payload. A later
 valid read becomes one new `fresh`/`OBSERVED` commit even when the underlying
-source timestamp is unchanged; repeated loss, recovery, restart, and reconnect
-do not invent additional commits. Polling remains delayed persisted
-observation, not live or real-time attachment.
+source timestamp is unchanged. If overview discovery itself becomes
+unsupported while known rows remain, those rows become visibly retained and
+unsupported instead of appearing normally fresh or disappearing. Repeated
+loss, recovery, restart, and reconnect do not invent additional commits.
+Polling remains delayed persisted observation, not live or real-time
+attachment.
 
 The maintainer accepted the corrected Ticket 01 real-session presentation and
 reconnect recovery after one continuously running CLI kept the same exact

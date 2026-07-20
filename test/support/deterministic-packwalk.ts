@@ -55,6 +55,8 @@ export interface DeterministicPackWalk {
   ) => Effect.Effect<void>
   readonly loseSourceForTest: Effect.Effect<void>
   readonly restoreSourceForTest: Effect.Effect<void>
+  readonly rejectDiscoveryForTest: Effect.Effect<void>
+  readonly acceptDiscoveryForTest: Effect.Effect<void>
   readonly loseExactSourceForTest: (
     sessionId: string,
   ) => Effect.Effect<void, SessionSourceError>
@@ -77,6 +79,8 @@ export interface RestartableDeterministicPackWalk {
   ) => Effect.Effect<void>
   readonly loseSourceForTest: Effect.Effect<void>
   readonly restoreSourceForTest: Effect.Effect<void>
+  readonly rejectDiscoveryForTest: Effect.Effect<void>
+  readonly acceptDiscoveryForTest: Effect.Effect<void>
   readonly loseExactSourceForTest: (
     sessionId: string,
   ) => Effect.Effect<void, SessionSourceError>
@@ -130,6 +134,7 @@ export const makeRestartableDeterministicPackWalk = (
     )
     const violateExactPollIdentityForTest = yield* Ref.make(false)
     const sourceAvailable = yield* Ref.make(true)
+    const discoveryCompatible = yield* Ref.make(true)
     const unavailableSessionIds = yield* Ref.make<ReadonlySet<string>>(
       new Set(),
     )
@@ -180,6 +185,8 @@ export const makeRestartableDeterministicPackWalk = (
     })
 
     const discover = Effect.fn("SessionSource.Test.discover")(function* () {
+      const compatible = yield* Ref.get(discoveryCompatible)
+      if (!compatible) return yield* sourceError("invalid-evidence")
       const facts = yield* readAll()
       const unavailable = yield* Ref.get(unavailableSessionIds)
       const available = facts.filter((fact) => !unavailable.has(fact.sessionId))
@@ -337,6 +344,8 @@ export const makeRestartableDeterministicPackWalk = (
         Ref.set(factRef, asFactInputs(fact)),
       loseSourceForTest: Ref.set(sourceAvailable, false),
       restoreSourceForTest: Ref.set(sourceAvailable, true),
+      rejectDiscoveryForTest: Ref.set(discoveryCompatible, false),
+      acceptDiscoveryForTest: Ref.set(discoveryCompatible, true),
       loseExactSourceForTest,
       restoreExactSourceForTest,
     }

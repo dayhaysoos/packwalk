@@ -406,7 +406,7 @@ export const codexSourceLayer = (path: string) =>
     }),
   )
 
-const createCurrentSchemaSql = `
+const createVersion2SchemaSql = `
   CREATE TABLE current_sessions (
     session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
       length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
@@ -447,7 +447,7 @@ const createCurrentSchemaSql = `
 `
 
 const migrateLegacySingletonSql = `
-  ${createCurrentSchemaSql}
+  ${createVersion2SchemaSql}
 
   INSERT INTO current_sessions (
     session_id,
@@ -482,7 +482,7 @@ const migrateLegacySingletonSql = `
   DROP TABLE current_session;
 `
 
-const createCurrentSchemaV3Sql = `
+const createVersion3SchemaSql = `
   CREATE TABLE current_sessions (
     session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
       length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
@@ -618,14 +618,14 @@ const migrateVersion2OverviewSql = `
   DROP TABLE current_sessions_v2;
 `
 
-const currentMigration = {
+const version2Migration = {
   version: 2,
   checksum: createHash("sha256")
     .update(migrateLegacySingletonSql)
     .digest("hex"),
 } as const
 
-const retainedProjectionMigration = {
+const version3Migration = {
   version: 3,
   checksum: createHash("sha256")
     .update(migrateVersion2OverviewSql)
@@ -633,8 +633,8 @@ const retainedProjectionMigration = {
 } as const
 
 const storageMigrations = [
-  currentMigration,
-  retainedProjectionMigration,
+  version2Migration,
+  version3Migration,
 ] as const
 
 const inspectStorageSchema = Effect.fn("SessionStorage.inspectSchema")(
@@ -715,7 +715,7 @@ const recordCurrentMigrations = (database: DatabaseSync): void => {
 
 const initializeFreshSchema = (database: DatabaseSync) =>
   runSchemaTransaction(database, () => {
-    database.exec(createCurrentSchemaV3Sql)
+    database.exec(createVersion3SchemaSql)
     database
       .prepare(`
         INSERT INTO storage_state (singleton, last_commit_sequence)
@@ -735,7 +735,7 @@ const migrateLegacySingleton = (
     )
     yield* runSchemaTransaction(database, () => {
       database.exec(migrateLegacySingletonSql)
-      recordMigration(database, currentMigration)
+      recordMigration(database, version2Migration)
     })
   })
 
@@ -899,7 +899,7 @@ const migrateVersion2Overview = (
     }
     yield* runSchemaTransaction(database, () => {
       database.exec(migrateVersion2OverviewSql)
-      recordMigration(database, retainedProjectionMigration)
+      recordMigration(database, version3Migration)
     })
   })
 
@@ -971,7 +971,7 @@ const initializeFreshSchemaFromSnapshot = (
   snapshot: ImportedStorageSnapshot,
 ) =>
   runSchemaTransaction(database, () => {
-    database.exec(createCurrentSchemaV3Sql)
+    database.exec(createVersion3SchemaSql)
     const insert = database.prepare(`
       INSERT INTO current_sessions (
         protocol_version,

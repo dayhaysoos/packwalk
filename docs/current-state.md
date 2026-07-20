@@ -620,18 +620,22 @@ maintainer acceptance is claimed.
 
 [Ticket 05](../.scratch/packwalk-post-launch-orientation/issues/05-restore-and-degrade-the-overview-safely.md)
 is claimed on `agent/ticket-05-safe-restoration` from fixed integration point
-`ef6ed5074b6a039ae7ced76e50508405c82f338e`. Its implementation is green
-pending fresh generic review and independent product preflight.
+`ef6ed5074b6a039ae7ced76e50508405c82f338e`. The first fresh generic review
+reported three Standards findings and two Specification findings. All five are
+fixed, full verification is green, and a wholly fresh generic review plus
+independent product preflight remain pending.
 
 `SessionView` v2 now makes freshness and provenance an explicit closed pair:
 accepted evidence is `fresh`/`Observed`, while last-supported metadata is
 `stale`/`Retained` with reason `source-unavailable` or `source-unsupported`.
 Exact polling failures, crossed identities, ambiguous evidence, and regressed
-source time never merge rejected payloads or drop a known row. Degradation
-preserves project, activity, evidence source, lifecycle state, source time, and
-the last successful observation time; it commits once. The same valid source
-fact recovers as one new observed commit even when its source timestamp did not
-change, and repeated loss or recovery is a no-op.
+source time never merge rejected payloads or drop a known row. A failed
+overview discovery with known rows visibly retains those rows as
+`source-unsupported` rather than masking the failure behind exact polling.
+Degradation preserves project, activity, evidence source, lifecycle state,
+source time, and the last successful observation time; it commits once. The
+same valid source fact recovers as one new observed commit even when its source
+timestamp did not change, and repeated loss or recovery is a no-op.
 
 The public command/event contract is strict protocol v3 on a distinct v3 local
 endpoint; every current view is protocol v2. SQLite remains authoritative in
@@ -646,14 +650,15 @@ or opens a second database writer. A general upgrade recovery workflow remains
 Ticket 08 scope.
 
 The strongest deterministic lifecycle proof crosses a first daemon, SQLite,
-daemon shutdown, a second fresh daemon scope, real local IPC, exact source
-loss, same-fact recovery, and reconnect. It restores commit N and its
-observation metadata byte-for-byte, commits retained loss as N+1, commits
-recovery as N+2, and reconnects to one current snapshot without replay. A
+daemon shutdown, a second fresh daemon scope, real local IPC, the production
+CLI renderer, exact source loss, same-fact recovery, and reconnect. It restores
+commit N and its observation metadata byte-for-byte, commits retained loss as
+N+1, commits recovery as N+2, renders the corresponding visible CLI frames, and
+reconnects to one current snapshot without replay. A
 two-session public test proves only the unavailable exact identity changes.
 Injected Windows, macOS, and Linux application-data/endpoint laws remain
 explicit; real transport execution is host-native and native three-platform
-qualification remains Ticket 10. The deterministic suite passes 22 files, 153
+qualification remains Ticket 10. The deterministic suite passes 22 files, 154
 tests, and one intentional host-policy skip; typecheck, lint, build, and diff
 checks pass. The opt-in installed-Codex test passes against this machine's real
 persisted source without starting, resuming, or changing a Codex session.

@@ -42,20 +42,30 @@ observed.
   adds closed `Observed` and `Retained` provenance with explicit fresh/stale
   consistency; strict protocol-v3 commands and events use a distinct v3 local
   endpoint. Exact unavailable, incompatible, ambiguous, crossed, and regressed
-  polling evidence retains prior metadata without merging rejected payloads;
-  repeated degradation is a no-op and the same valid source fact recovers once.
+  polling evidence retains prior metadata without merging rejected payloads.
+  A failed overview discovery with known rows retains those rows as
+  `source-unsupported` instead of hiding the failure behind successful exact
+  polls; repeated degradation is a no-op and the same valid source fact
+  recovers once.
   Storage migration 3 preserves the immutable migration-2 checksum, validates
   rows and allocator before upgrading an existing v2 overview in place, and
   takes an SQLite-aware `.pre-migration-v3.sqlite` backup. A real
-  daemon/SQLite/IPC test closes one
-  daemon scope, restores commit N byte-for-byte in a second, commits exact loss
-  as N+1 and same-fact recovery as N+2, and reconnects to one current snapshot
-  without replay. A separate two-session test proves only the lost identity
-  changes. The deterministic suite passes 22 files, 153 tests, and one
-  intentional host-policy skip; typecheck, lint, build, and diff checks pass.
+  daemon/SQLite/IPC/CLI test closes one daemon scope, restores commit N
+  byte-for-byte in a second, commits exact loss as N+1 and same-fact recovery
+  as N+2, renders every frame through the production CLI client, and reconnects
+  to one current snapshot without replay. A separate two-session test proves
+  only the lost identity changes. The deterministic suite passes 22 files, 154
+  tests, and one intentional host-policy skip; typecheck, lint, build, and diff
+  checks pass.
   The opt-in installed-Codex test also passes against this machine's real
   persisted source without starting, resuming, or changing a Codex session.
   Fresh generic review and independent product preflight remain required. A
   persistent protocol-v2 daemon must release the shared `packwalk-v2.sqlite`
   writer before protocol v3 can migrate it; PackWalk fails closed and does not
   kill that older daemon. Generic upgrade recovery belongs to Ticket 08.
+- 2026-07-20: The first fresh generic review reported three Standards findings
+  and two Specification findings. All five are fixed: storage-v3's checksum is
+  pinned, frozen migration names are versioned, reducer bookkeeping is shared,
+  unsupported discovery is visibly retained, and the lifecycle proof crosses
+  the CLI renderer. Full verification and the installed-Codex test are green;
+  a wholly fresh generic review remains required.

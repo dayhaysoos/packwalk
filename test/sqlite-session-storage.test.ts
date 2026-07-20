@@ -187,7 +187,7 @@ it.effect("upgrades a version-2 overview without inventing an observation", () =
           .all(),
       ).toEqual([
         { version: 2, checksum: "a4c7d933c09ca96f969b1961c901975c2892b320155798ccd0c633a536f1e9da" },
-        { version: 3, checksum: expect.stringMatching(/^[0-9a-f]{64}$/) },
+        { version: 3, checksum: "b826aad5bc76aa893936ec447db0749a20e681108bf7ceb407313c1c88dddb11" },
       ])
       expect(
         migrated

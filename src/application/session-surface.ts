@@ -65,6 +65,15 @@ interface ExactPollOutcome {
   readonly result: Result.Result<CodexPersistedFact, SessionSourceError>
 }
 
+type SessionTransitionDecision = ReturnType<typeof degradeSession>
+
+interface ObservationAccumulator {
+  readonly nextByIdentity: Map<SessionIdentity, SessionView>
+  readonly changedViews: Array<SessionView>
+  readonly changedSessionIds: Array<SessionIdentity>
+  lastCommitSequence: number
+}
+
 const sourceUnavailableEvent = (
   code:
     | "source-incompatible"
@@ -196,6 +205,53 @@ const exactIdentityOrder = (
       ? 1
       : 0
 
+const makeObservationAccumulator = (
+  current: SessionStorageSnapshot,
+): ObservationAccumulator => ({
+  nextByIdentity: new Map(
+    current.views.map((view) => [view.sessionId, view] as const),
+  ),
+  changedViews: [],
+  changedSessionIds: [],
+  lastCommitSequence: current.lastCommitSequence,
+})
+
+const recordSessionTransition = (
+  accumulator: ObservationAccumulator,
+  transition: SessionTransitionDecision,
+): void =>
+  matchTransition(transition, {
+    NoChange: () => undefined,
+    Changed: ({ view }) => {
+      accumulator.lastCommitSequence = view.commitSequence
+      accumulator.nextByIdentity.set(view.sessionId, view)
+      accumulator.changedViews.push(view)
+      accumulator.changedSessionIds.push(view.sessionId)
+    },
+  })
+
+const completeObservation = Effect.fn("SessionSurface.completeObservation")(
+  function* (accumulator: ObservationAccumulator) {
+    const orderedViews = Array.from(accumulator.nextByIdentity.values()).sort(
+      exactIdentityOrder,
+    )
+    const firstView = orderedViews[0]
+    if (firstView === undefined) {
+      return yield* new SessionSourceError({
+        code: "unavailable",
+        message: "Codex persisted evidence is unavailable",
+      })
+    }
+
+    return {
+      views: [firstView, ...orderedViews.slice(1)],
+      changedViews: accumulator.changedViews,
+      changedSessionIds: accumulator.changedSessionIds,
+      lastCommitSequence: accumulator.lastCommitSequence,
+    } satisfies ObservationDecision
+  },
+)
+
 const validateFacts = (
   facts: ReadonlyArray<CodexPersistedFact>,
 ): Effect.Effect<NonEmptyReadonlyArray<CodexPersistedFact>, SessionSourceError> =>
@@ -238,16 +294,11 @@ const reduceObservation = Effect.fn("SessionSurface.reduceObservation")(
     trigger: SessionTransitionTrigger,
   ) {
     const facts = yield* validateFacts(sourceFacts)
-    const nextByIdentity = new Map(
-      current.views.map((view) => [view.sessionId, view] as const),
-    )
-    const changedViews: Array<SessionView> = []
-    const changedSessionIds: Array<SessionIdentity> = []
-    let lastCommitSequence = current.lastCommitSequence
+    const accumulator = makeObservationAccumulator(current)
 
     for (const [factIndex, fact] of facts.entries()) {
       const currentView = matchSessionTransitionTrigger(trigger, {
-        Discovery: () => nextByIdentity.get(fact.sessionId),
+        Discovery: () => accumulator.nextByIdentity.get(fact.sessionId),
         Polling: () => current.views[factIndex],
       })
       const requiresExistingIdentity = matchSessionTransitionTrigger(trigger, {
@@ -265,41 +316,16 @@ const reduceObservation = Effect.fn("SessionSurface.reduceObservation")(
         fact,
         observedAtMs,
         trigger,
-        lastCommitSequence + 1,
+        accumulator.lastCommitSequence + 1,
       )
       if (Result.isFailure(decision)) {
         return yield* decision.failure
       }
 
-      yield* matchTransition(decision.success, {
-        NoChange: () => Effect.void,
-        Changed: ({ view }) =>
-          Effect.sync(() => {
-            lastCommitSequence = view.commitSequence
-            nextByIdentity.set(view.sessionId, view)
-            changedViews.push(view)
-            changedSessionIds.push(view.sessionId)
-          }),
-      })
+      recordSessionTransition(accumulator, decision.success)
     }
 
-    const orderedViews = Array.from(nextByIdentity.values()).sort(
-      exactIdentityOrder,
-    )
-    const firstView = orderedViews[0]
-    if (firstView === undefined) {
-      return yield* new SessionSourceError({
-        code: "unavailable",
-        message: "Codex persisted evidence is unavailable",
-      })
-    }
-
-    return {
-      views: [firstView, ...orderedViews.slice(1)],
-      changedViews,
-      changedSessionIds,
-      lastCommitSequence,
-    } satisfies ObservationDecision
+    return yield* completeObservation(accumulator)
   },
 )
 
@@ -316,19 +342,14 @@ const reducePolling = Effect.fn("SessionSurface.reducePolling")(
     outcomes: ReadonlyArray<ExactPollOutcome>,
     observedAtMs: number,
   ) {
-    const nextByIdentity = new Map(
-      current.views.map((view) => [view.sessionId, view] as const),
-    )
-    const changedViews: Array<SessionView> = []
-    const changedSessionIds: Array<SessionIdentity> = []
-    let lastCommitSequence = current.lastCommitSequence
+    const accumulator = makeObservationAccumulator(current)
 
     for (const outcome of outcomes) {
       const transition = Result.isFailure(outcome.result)
         ? degradeSession(
             outcome.view,
             retentionReason(outcome.result.failure),
-            lastCommitSequence + 1,
+            accumulator.lastCommitSequence + 1,
           )
         : (() => {
             const observed = transitionSession(
@@ -336,46 +357,21 @@ const reducePolling = Effect.fn("SessionSurface.reducePolling")(
               outcome.result.success,
               observedAtMs,
               SessionTransitionTrigger.Polling(),
-              lastCommitSequence + 1,
+              accumulator.lastCommitSequence + 1,
             )
             return Result.isFailure(observed)
               ? degradeSession(
                   outcome.view,
                   "source-unsupported",
-                  lastCommitSequence + 1,
+                  accumulator.lastCommitSequence + 1,
                 )
               : observed.success
           })()
 
-      yield* matchTransition(transition, {
-        NoChange: () => Effect.void,
-        Changed: ({ view }) =>
-          Effect.sync(() => {
-            lastCommitSequence = view.commitSequence
-            nextByIdentity.set(view.sessionId, view)
-            changedViews.push(view)
-            changedSessionIds.push(view.sessionId)
-          }),
-      })
+      recordSessionTransition(accumulator, transition)
     }
 
-    const orderedViews = Array.from(nextByIdentity.values()).sort(
-      exactIdentityOrder,
-    )
-    const firstView = orderedViews[0]
-    if (firstView === undefined) {
-      return yield* new SessionSourceError({
-        code: "unavailable",
-        message: "Codex persisted evidence is unavailable",
-      })
-    }
-
-    return {
-      views: [firstView, ...orderedViews.slice(1)],
-      changedViews,
-      changedSessionIds,
-      lastCommitSequence,
-    } satisfies ObservationDecision
+    return yield* completeObservation(accumulator)
   },
 )
 
@@ -474,9 +470,17 @@ export const layer = Layer.effect(
 
       const discovered = yield* source.discover().pipe(Effect.result)
       if (Result.isFailure(discovered)) {
-        return current.views.length === 0
-          ? yield* discovered.failure
-          : yield* pollCommitted(current)
+        if (current.views.length === 0) return yield* discovered.failure
+
+        const observedAtMs = yield* Clock.currentTimeMillis
+        return yield* reducePolling(
+          current,
+          current.views.map((view) => ({
+            view,
+            result: Result.fail(discovered.failure),
+          })),
+          observedAtMs,
+        )
       }
 
       const observedAtMs = yield* Clock.currentTimeMillis
