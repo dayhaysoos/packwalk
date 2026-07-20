@@ -165,6 +165,10 @@ without shell quoting. A pure Windows-path invocation regression first failed
 against the old direct-shim plan. Three focused tests are green; full
 verification passes 19 files and 77 tests plus typecheck, lint, and build.
 Another fresh independent review remains required.
+Fresh generic review pass 8 is clean with zero actionable Standards findings
+and zero Ticket 03 Specification findings across the complete branch through
+`3553d49d97f7428a4928e8102693da81e5a1f2fc`. Independent product preflight is
+the remaining Ticket 03 delivery gate; no maintainer acceptance is claimed.
 
 ## Reproduce
 

@@ -114,3 +114,8 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   avoiding shell quoting and direct command-shim execution. Three focused tests
   are green; full verification passes 19 files and 77 tests plus typecheck,
   lint, and build. Another fresh review remains required.
+- 2026-07-20: Fresh generic review pass 8 is clean with zero actionable
+  Standards findings and zero Ticket 03 Specification findings across the
+  complete fixed-point diff through `3553d49d97f7428a4928e8102693da81e5a1f2fc`.
+  The independent product preflight is now the remaining delivery gate; no
+  maintainer acceptance is claimed.
