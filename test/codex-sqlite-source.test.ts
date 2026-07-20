@@ -206,6 +206,7 @@ it.effect("refreshes the one current session when a later CLI subscribes", () =>
       projectIdentity: "replacement-project",
       sourceUpdatedAtMs: 2_500,
     })
+    yield* TestClock.adjust("1 second")
 
     const reconnected = Array.from(
       yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
@@ -217,7 +218,7 @@ it.effect("refreshes the one current session when a later CLI subscribes", () =>
         projectIdentity: "replacement-project",
         state: { _tag: "Discovered" },
         sourceUpdatedAtMs: 2_500,
-        observedAtMs: 2_000,
+        observedAtMs: 3_000,
         commitSequence: 2,
       },
     })

@@ -12,12 +12,17 @@ import {
   Stream,
 } from "effect"
 
-import { Service as SessionSource } from "./session-source.js"
+import {
+  Service as SessionSource,
+  SessionSourceError,
+} from "./session-source.js"
 import { Service as SessionStorage } from "./session-storage.js"
 import {
   matchTransition,
+  matchSessionTransitionTrigger,
   SessionEvent,
   SessionTransitionTrigger,
+  type SessionView,
   transitionSession,
 } from "../domain/session.js"
 
@@ -81,11 +86,15 @@ const publicEvents = (
   )
 
 const makeEventState = Effect.fn("SessionSurface.makeEventState")(
-  function* (initialEvent: SessionEvent) {
+  function* (
+    initialEvent: SessionEvent,
+    initialView: Option.Option<SessionView>,
+  ) {
     const current = yield* Ref.make<SessionEventEnvelope>({
       revision: 0,
       event: initialEvent,
     })
+    const committedView = yield* Ref.make(initialView)
     const updates = yield* Effect.acquireRelease(
       PubSub.sliding<SessionEventEnvelope>(1),
       PubSub.shutdown,
@@ -93,6 +102,9 @@ const makeEventState = Effect.fn("SessionSurface.makeEventState")(
     const publish = Effect.fn("SessionSurface.publish")(function* (
       event: SessionEvent,
     ) {
+      if (event._tag !== "SessionUnavailable") {
+        yield* Ref.set(committedView, Option.some(event.view))
+      }
       const envelope = yield* Ref.modify(current, (previous) => {
         const next = {
           revision: previous.revision + 1,
@@ -104,6 +116,7 @@ const makeEventState = Effect.fn("SessionSurface.makeEventState")(
     }, Effect.uninterruptible)
 
     return {
+      committedView: Ref.get(committedView),
       currentEvent: Ref.get(current).pipe(Effect.map((envelope) => envelope.event)),
       events: publicEvents(current, updates),
       publish,
@@ -118,67 +131,81 @@ export const layer = Layer.effect(
     const storage = yield* SessionStorage
     const restored = yield* storage.load()
     const initialResult = yield* source.discover().pipe(Effect.result)
+    const initial = Result.isFailure(initialResult)
+      ? {
+          event: sourceUnavailableEvent(
+            initialResult.failure.code === "unavailable"
+              ? "source-unavailable"
+              : "source-incompatible",
+          ),
+          view: restored,
+        }
+      : yield* Effect.gen(function* () {
+          const observedAtMs = yield* Clock.currentTimeMillis
+          const decision = transitionSession(
+            restored,
+            initialResult.success,
+            observedAtMs,
+            SessionTransitionTrigger.Discovery(),
+          )
+          if (Result.isFailure(decision)) {
+            return yield* decision.failure
+          }
 
-    if (Result.isFailure(initialResult)) {
-      const unavailable = sourceUnavailableEvent(
-        initialResult.failure.code === "unavailable"
-          ? "source-unavailable"
-          : "source-incompatible",
-      )
-      const eventState = yield* makeEventState(unavailable)
-      return Service.of({
-        events: eventState.events,
-        refresh: Effect.fn("SessionSurface.refresh")(() => Effect.void),
-        runPolling: Effect.never,
-      })
-    }
-
-    const initialFact = initialResult.success
-    const observedAtMs = yield* Clock.currentTimeMillis
-    const initialDecision = transitionSession(
-      restored,
-      initialFact,
-      observedAtMs,
-      SessionTransitionTrigger.Discovery(),
-    )
-
-    if (Result.isFailure(initialDecision)) {
-      return yield* initialDecision.failure
-    }
-
-    const initialEvent =
-      initialDecision.success._tag === "NoChange"
-        ? Option.match(restored, {
-            onNone: () => {
-              throw new Error("Initial discovery did not produce a session snapshot")
-            },
-            onSome: (view) =>
-              SessionEvent.cases.SessionSnapshot.make({
-                protocolVersion: 1,
-                view,
+          if (decision.success._tag === "NoChange") {
+            return Option.match(restored, {
+              onNone: () => {
+                throw new Error(
+                  "Initial discovery did not produce a session snapshot",
+                )
+              },
+              onSome: (view) => ({
+                event: SessionEvent.cases.SessionSnapshot.make({
+                  protocolVersion: 1,
+                  view,
+                }),
+                view: restored,
               }),
-          })
-        : initialDecision.success.event
+            })
+          }
 
-    if (initialDecision.success._tag === "Changed") {
-      yield* storage.commit(initialDecision.success.view)
-    }
-    const eventState = yield* makeEventState(initialEvent)
+          yield* storage.commit(decision.success.view)
+          return {
+            event: decision.success.event,
+            view: Option.some(decision.success.view),
+          }
+        })
+
+    const eventState = yield* makeEventState(initial.event, initial.view)
     const transitionSemaphore = yield* Semaphore.make(1)
 
     const observeOnce = Effect.fn("SessionSurface.observeOnce")(function* (
       trigger: SessionTransitionTrigger,
     ) {
       const currentEvent = yield* eventState.currentEvent
-      if (currentEvent._tag === "SessionUnavailable") {
+      const currentView = yield* eventState.committedView
+      const skipUnavailablePoll = matchSessionTransitionTrigger(trigger, {
+        Discovery: () => false,
+        Polling: () => currentEvent._tag === "SessionUnavailable",
+      })
+      if (skipUnavailablePoll) {
         return
       }
 
-      const factResult = yield* (
-        trigger._tag === "Discovery"
-          ? source.discover()
-          : source.poll(currentEvent.view.sessionId)
-      ).pipe(Effect.result)
+      const factResult = yield* matchSessionTransitionTrigger(trigger, {
+        Discovery: () => source.discover(),
+        Polling: () =>
+          Option.match(currentView, {
+            onNone: () =>
+              Effect.fail(
+                new SessionSourceError({
+                  code: "unavailable",
+                  message: "Codex persisted evidence is unavailable",
+                }),
+              ),
+            onSome: (view) => source.poll(view.sessionId),
+          }),
+      }).pipe(Effect.result)
       if (Result.isFailure(factResult)) {
         yield* eventState.publish(
           sourceUnavailableEvent(
@@ -192,23 +219,35 @@ export const layer = Layer.effect(
 
       const now = yield* Clock.currentTimeMillis
       const decision = transitionSession(
-        Option.some(currentEvent.view),
+        currentView,
         factResult.success,
         now,
         trigger,
       )
       if (Result.isFailure(decision)) {
-        if (trigger._tag === "Polling") {
-          return yield* decision.failure
-        }
-        yield* eventState.publish(
-          sourceUnavailableEvent("source-incompatible"),
-        )
-        return
+        return yield* matchSessionTransitionTrigger(trigger, {
+          Discovery: () =>
+            eventState.publish(
+              sourceUnavailableEvent("source-incompatible"),
+            ),
+          Polling: () => decision.failure,
+        })
       }
 
       yield* matchTransition(decision.success, {
-        NoChange: () => Effect.void,
+        NoChange: () =>
+          currentEvent._tag === "SessionUnavailable"
+            ? Option.match(currentView, {
+                onNone: () => Effect.void,
+                onSome: (view) =>
+                  eventState.publish(
+                    SessionEvent.cases.SessionSnapshot.make({
+                      protocolVersion: 1,
+                      view,
+                    }),
+                  ),
+              })
+            : Effect.void,
         Changed: ({ event, view }) =>
           storage.commit(view).pipe(
             Effect.matchEffect({

@@ -59,7 +59,8 @@ repository, then install the exact lockfile once:
 npm ci
 ```
 
-Start at least one ordinary Codex TUI independently, before PackWalk. From this
+Start at least one ordinary Codex TUI independently, before PackWalk, and
+complete one turn so its supported persisted record is current. From this
 repository, the single PackWalk command is:
 
 ```sh
@@ -68,21 +69,25 @@ npm run packwalk
 
 That command builds the package binary, starts or connects to the PackWalk
 daemon automatically, and opens the plain CLI view. Do not start a separate
-daemon. Continue working in the original Codex session. After Codex persists a
-supported change, the polling slice is expected to refresh the compact table
-row with its project name, honest state, activity, and updated time. Press
-Ctrl-C to close the CLI. On redirected output, a dumb terminal, or a terminal
-too narrow for the table, each update is printed as a new plain-text table.
-This does not stop or change Codex.
+daemon. The six-line table shows project, exact Codex session identity,
+supported activity, evidence source, freshness, millisecond source-update time,
+PackWalk observation time, and honest state. Note the `SESSION` and
+`SOURCE UPDATED` values, then complete another turn in that same Codex session.
+After Codex
+persists the change and polling observes it, PackWalk keeps the same `SESSION`,
+shows `POLLED`, and renders a later `SOURCE UPDATED` value. A capable terminal
+with enough width refreshes the same six lines. Redirected output, a dumb
+terminal, or a terminal too narrow for the table appends each complete
+plain-text table instead. Press Ctrl-C to close the CLI; the daemon and Codex
+continue independently.
 
 A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live
 attachment or direct control.
 
-The real-session presentation is currently awaiting renewed maintainer
-acceptance: continuing Codex activity did not visibly update in a later run,
-and the compact table omits required session identity, evidence-source, and
-freshness fields that already exist in the daemon view. See
+The corrected real-session presentation and reconnect recovery are undergoing
+final branch review before renewed maintainer acceptance. The maintainer's
+personal real-product criterion remains deliberately unchecked. See
 [current state](docs/current-state.md) and
 [Ticket 01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md).
 

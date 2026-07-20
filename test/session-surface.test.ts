@@ -309,6 +309,48 @@ it.effect("rejects incompatible or content-bearing evidence with a redacted publ
   }),
 )
 
+it.effect("recovers startup discovery when a later CLI subscribes after evidence appears", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const packWalk = yield* makeDeterministicPackWalk({
+      version: 2,
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 1_000,
+    })
+
+    const unavailable = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(unavailable[0]).toMatchObject({
+      _tag: "SessionUnavailable",
+      code: "source-incompatible",
+    })
+
+    yield* packWalk.persistSourceFactForTest({
+      version: 1,
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 2_500,
+    })
+
+    const recovered = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(recovered[0]).toMatchObject({
+      _tag: "SessionSnapshot",
+      view: {
+        sessionId,
+        projectIdentity: "fixture-project",
+        state: { _tag: "Discovered" },
+        sourceUpdatedAtMs: 2_500,
+        observedAtMs: 2_000,
+        commitSequence: 1,
+      },
+    })
+  }),
+)
+
 it.effect("does not publish a session update when its authoritative commit fails", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)

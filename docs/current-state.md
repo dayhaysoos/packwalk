@@ -63,9 +63,14 @@ different session, and preserves monotonic PackWalk commit order. It does not
 enumerate, display, or poll multiple sessions concurrently. The compact
 six-line table now shows project, exact session identity, activity, evidence
 source, freshness, millisecond source-update time, observation time, and honest
-state. Deterministic verification and a real cold-start-plus-reconnect exercise
-are green; generic code review and independent product preflight remain before
-the issue can move to maintainer-only acceptance.
+state. It also retains the last committed singleton separately from a public
+unavailable event, allowing a later CLI subscription to recover startup
+discovery or a source-lost poll before exact-identity polling resumes. The
+README now documents this same complete table and maintainer demonstration.
+Deterministic verification (15 files, 65 tests) and a real
+cold-start-plus-reconnect exercise are green; fresh generic code review and
+independent product preflight remain before the issue can move to
+maintainer-only acceptance.
 
 ## Reproduce
 

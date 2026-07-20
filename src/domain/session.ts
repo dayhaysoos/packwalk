@@ -123,6 +123,9 @@ export type SessionTransitionTrigger = Data.TaggedEnum<{
 export const SessionTransitionTrigger =
   Data.taggedEnum<SessionTransitionTrigger>()
 
+export const matchSessionTransitionTrigger =
+  SessionTransitionTrigger.$match
+
 type TransitionDecision = Data.TaggedEnum<{
   NoChange: {}
   Changed: {
@@ -133,6 +136,24 @@ type TransitionDecision = Data.TaggedEnum<{
 
 const TransitionDecision = Data.taggedEnum<TransitionDecision>()
 
+const makeDiscoveredSessionView = (
+  fact: CodexPersistedFact,
+  observedAtMs: number,
+  commitSequence: number,
+): SessionView =>
+  SessionView.make({
+    protocolVersion: 1,
+    sessionId: fact.sessionId,
+    projectIdentity: fact.projectIdentity,
+    activity: "persisted Codex activity",
+    evidenceSource: "codex-sqlite-thread-index",
+    state: SessionState.cases.Discovered.make({}),
+    freshness: "fresh",
+    sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
+    observedAtMs,
+    commitSequence,
+  })
+
 export const transitionSession = (
   current: Option.Option<SessionView>,
   fact: CodexPersistedFact,
@@ -140,18 +161,7 @@ export const transitionSession = (
   trigger: SessionTransitionTrigger = SessionTransitionTrigger.Polling(),
 ): Result.Result<TransitionDecision, IllegalSessionTransition> => {
   if (Option.isNone(current)) {
-    const view = SessionView.make({
-      protocolVersion: 1,
-      sessionId: fact.sessionId,
-      projectIdentity: fact.projectIdentity,
-      activity: "persisted Codex activity",
-      evidenceSource: "codex-sqlite-thread-index",
-      state: SessionState.cases.Discovered.make({}),
-      freshness: "fresh",
-      sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
-      observedAtMs,
-      commitSequence: 1,
-    })
+    const view = makeDiscoveredSessionView(fact, observedAtMs, 1)
 
     return Result.succeed(
       TransitionDecision.Changed({
@@ -161,44 +171,44 @@ export const transitionSession = (
     )
   }
 
-  if (
-    current.value.sessionId !== fact.sessionId &&
-    trigger._tag === "Polling"
-  ) {
-    return Result.fail(new IllegalSessionTransition({ reason: "session-identity-changed" }))
-  }
-
   if (current.value.sessionId !== fact.sessionId) {
-    const view = SessionView.make({
-      protocolVersion: 1,
-      sessionId: fact.sessionId,
-      projectIdentity: fact.projectIdentity,
-      activity: "persisted Codex activity",
-      evidenceSource: "codex-sqlite-thread-index",
-      state: SessionState.cases.Discovered.make({}),
-      freshness: "fresh",
-      sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
-      observedAtMs,
-      commitSequence: current.value.commitSequence + 1,
-    })
+    return matchSessionTransitionTrigger(trigger, {
+      Discovery: () => {
+        const view = makeDiscoveredSessionView(
+          fact,
+          observedAtMs,
+          current.value.commitSequence + 1,
+        )
 
-    return Result.succeed(
-      TransitionDecision.Changed({
-        view,
-        event: SessionEvent.cases.SessionUpdated.make({
-          protocolVersion: 1,
-          view,
-        }),
-      }),
-    )
+        return Result.succeed(
+          TransitionDecision.Changed({
+            view,
+            event: SessionEvent.cases.SessionUpdated.make({
+              protocolVersion: 1,
+              view,
+            }),
+          }),
+        )
+      },
+      Polling: () =>
+        Result.fail(
+          new IllegalSessionTransition({
+            reason: "session-identity-changed",
+          }),
+        ),
+    })
   }
 
   if (fact.sourceUpdatedAtMs < current.value.sourceUpdatedAtMs) {
     return Result.fail(new IllegalSessionTransition({ reason: "source-time-regressed" }))
   }
 
+  const unchangedEvidenceIsNoChange = matchSessionTransitionTrigger(trigger, {
+    Discovery: () => true,
+    Polling: () => current.value.state._tag === "Polled",
+  })
   if (
-    (trigger._tag === "Discovery" || current.value.state._tag === "Polled") &&
+    unchangedEvidenceIsNoChange &&
     fact.sourceUpdatedAtMs === current.value.sourceUpdatedAtMs
   ) {
     return Result.succeed(TransitionDecision.NoChange())

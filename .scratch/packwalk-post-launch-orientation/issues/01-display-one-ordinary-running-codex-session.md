@@ -89,7 +89,16 @@ repository-local execution of the package binary is required.
   commit order. The six-line plain table shows project, exact session identity,
   activity, evidence, freshness, millisecond source-update time, observation
   time, and honest state without adding multi-session or live behavior.
-  `npm run verify` passes 15 deterministic files and 64 tests. A real cold start
+  `npm run verify` passes 15 deterministic files and 65 tests. A real cold start
   from the previously failing persisted state, followed by a reconnect to the
   surviving daemon, both selected the active PackWalk task and visibly rendered
   later persisted source updates. The maintainer criterion remains unchecked.
+- 2026-07-19: Review pass 2 found that a daemon which had already published
+  `SessionUnavailable` could skip later subscribe-time discovery, and that the
+  README still described the superseded four-field table. The daemon now keeps
+  its last committed one-session view separate from public availability, so a
+  later subscription can recover either startup discovery or a source-lost
+  poll and then resume exact-identity polling. Deterministic public-seam tests
+  cover both recovery cases, and the README now carries the same exact
+  maintainer demonstration as this ticket and `docs/current-state.md`. Full
+  verification is green; fresh generic review remains in progress.

@@ -39,6 +39,9 @@ export interface DeterministicPackWalk {
   readonly persistSourceIdentityForTest: (
     sessionId: string,
   ) => Effect.Effect<void, SessionSourceError>
+  readonly persistSourceFactForTest: (
+    fact: unknown,
+  ) => Effect.Effect<void>
   readonly loseSourceForTest: Effect.Effect<void>
 }
 
@@ -158,6 +161,7 @@ export const makeDeterministicPackWalk = (
       lifetime: daemon.lifetime,
       persistSourceUpdate,
       persistSourceIdentityForTest,
+      persistSourceFactForTest: (fact) => Ref.set(factRef, fact),
       loseSourceForTest: Ref.set(sourceAvailable, false),
     }
   })
