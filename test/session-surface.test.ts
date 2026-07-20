@@ -1,12 +1,15 @@
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Stream } from "effect"
+import { Deferred, Effect, Fiber, Result, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { makeDeterministicPackWalk } from "./support/deterministic-packwalk.js"
 import { makeDeterministicSessionSurface } from "./support/deterministic-session-surface.js"
 import {
   CodexPersistedFact,
+  encodeSessionProtocolEvent,
+  MaximumSessionEventBytes,
   ProjectIdentity,
+  SessionEvent,
   SessionIdentity,
   SessionState,
   SessionView,
@@ -362,6 +365,101 @@ it.effect("rejects an unpublishable overview update before advancing stored stat
     if (recovered?._tag !== "SessionsSnapshot") return
     expect(recovered.views).toHaveLength(84)
     expect(recovered.views.at(-1)?.commitSequence).toBe(84)
+  }),
+)
+
+it.effect("falls back to a bounded complete snapshot when changed identities make the polling update too large", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const facts = makeMaximumEscapedFacts(84)
+    const expectedPolledViews = facts.map((fact, index) =>
+      SessionView.make({
+        protocolVersion: 1,
+        sessionId: fact.sessionId,
+        projectIdentity: fact.projectIdentity,
+        activity: "persisted Codex activity",
+        evidenceSource: "codex-sqlite-thread-index",
+        state: SessionState.cases.Polled.make({}),
+        freshness: "fresh",
+        sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
+        observedAtMs: 3_000,
+        commitSequence: 85 + index,
+      }),
+    )
+    const firstExpectedPolledView = expectedPolledViews[0]
+    if (firstExpectedPolledView === undefined) {
+      return yield* Effect.die("missing expected polled view")
+    }
+    const expectedOverviewViews = [
+      firstExpectedPolledView,
+      ...expectedPolledViews.slice(1),
+    ] as const
+    const expectedSnapshot = SessionEvent.cases.SessionsSnapshot.make({
+      protocolVersion: 2,
+      views: expectedOverviewViews,
+    })
+    const oversizedUpdate = SessionEvent.cases.SessionsUpdated.make({
+      protocolVersion: 2,
+      views: expectedOverviewViews,
+      changedSessionIds: facts.map((fact) => fact.sessionId),
+    })
+    const encodedSnapshot = yield* encodeSessionProtocolEvent(expectedSnapshot)
+    const updateEncoding = yield* encodeSessionProtocolEvent(
+      oversizedUpdate,
+    ).pipe(Effect.result)
+
+    expect(new TextEncoder().encode(encodedSnapshot).byteLength)
+      .toBeLessThanOrEqual(MaximumSessionEventBytes)
+    expect(Result.isFailure(updateEncoding)).toBe(true)
+
+    const surface = yield* makeDeterministicSessionSurface(facts)
+    const initialObserved = yield* Deferred.make<void>()
+    const collected = yield* surface.events.pipe(
+      Stream.tap(() => Deferred.succeed(initialObserved, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+
+    yield* Deferred.await(initialObserved)
+    yield* TestClock.adjust("1 second")
+
+    const events = Array.from(yield* Fiber.join(collected))
+    expect(events[0]?._tag).toBe("SessionsSnapshot")
+    expect(events[1]?._tag).toBe("SessionsSnapshot")
+    const polled = events[1]
+    if (polled?._tag !== "SessionsSnapshot") return
+    expect(polled.views).toHaveLength(84)
+    expect(polled.views.every((view, index) =>
+      view.sessionId === facts[index]?.sessionId
+    )).toBe(true)
+    expect(polled.views.every((view) => view.state._tag === "Polled")).toBe(true)
+    expect(polled.views.map((view) => view.commitSequence)).toEqual(
+      Array.from({ length: 84 }, (_, index) => 85 + index),
+    )
+
+    const committed = yield* surface.storedSnapshot()
+    expect(committed.views).toHaveLength(84)
+    expect(committed.lastCommitSequence).toBe(168)
+    expect(committed.views.every((view) => view.state._tag === "Polled"))
+      .toBe(true)
+
+    yield* TestClock.adjust("1 second")
+    const afterSecondPoll = yield* surface.storedSnapshot()
+    expect(afterSecondPoll.lastCommitSequence).toBe(168)
+    expect(afterSecondPoll.views.map((view) => view.commitSequence)).toEqual(
+      committed.views.map((view) => view.commitSequence),
+    )
+
+    const reconnect = Array.from(
+      yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
+    )[0]
+    expect(reconnect?._tag).toBe("SessionsSnapshot")
+    if (reconnect?._tag !== "SessionsSnapshot") return
+    expect(reconnect.views).toHaveLength(84)
+    expect(reconnect.views.every((view) => view.state._tag === "Polled"))
+      .toBe(true)
+    expect(reconnect.views.at(-1)?.commitSequence).toBe(168)
   }),
 )
 

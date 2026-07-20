@@ -328,6 +328,17 @@ const ensurePublishableEvent = Effect.fn(
   return event
 })
 
+const selectPublishableEvent = Effect.fn(
+  "SessionSurface.selectPublishableEvent",
+)(function* (decision: ObservationDecision) {
+  const updatedResult = yield* ensurePublishableEvent(
+    updatedEvent(decision),
+  ).pipe(Effect.result)
+  if (!Result.isFailure(updatedResult)) return updatedResult.success
+
+  return yield* ensurePublishableEvent(snapshotEvent(decision.views))
+})
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -480,10 +491,10 @@ export const layer = Layer.effect(
         return
       }
 
-      const eventResult = yield* ensurePublishableEvent(
+      const eventResult = yield* (
         currentEvent._tag === "SessionUnavailable"
-          ? snapshotEvent(reduced.views)
-          : updatedEvent(reduced),
+          ? ensurePublishableEvent(snapshotEvent(reduced.views))
+          : selectPublishableEvent(reduced)
       ).pipe(Effect.result)
       if (Result.isFailure(eventResult)) {
         yield* eventState.publish(overviewUnavailableEvent())

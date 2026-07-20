@@ -144,3 +144,27 @@ sessions overlap, share a repository, or have duplicate display labels.
   A supplemental Effect/IPC audit reports zero actionable findings. Ticket 04
   remains claimed for a wholly fresh generic review and independent product
   preflight; no maintainer acceptance is claimed.
+- 2026-07-20: Fresh generic review pass 4 reports zero actionable
+  Specification findings and one P1 Standards blocker. An 84-row maximum-field
+  snapshot is publishable at 4,147,464 bytes, but the required first poll turns
+  every row from `Discovered` to `Polled`; repeating all 84 identities in
+  `SessionsUpdated` raises that event to 6,209,601 bytes. The current rejection
+  preserves storage but can repeat forever without unrelated source mutation.
+  Ticket 04 remains claimed while a red boundary regression proves that a
+  publishable complete snapshot becomes the committed fallback when only its
+  richer update envelope exceeds the shared codec limit. Full verification and
+  an entirely fresh generic review follow; product preflight remains paused.
+- 2026-07-20: The pass-4 P1 blocker is repaired with a red boundary
+  regression. For normal changes, the surface validates `SessionsUpdated`
+  first and falls back to the equivalent complete `SessionsSnapshot` when only
+  the changed-identity envelope exceeds the shared codec limit. If neither is
+  publishable it still emits `overview-unavailable` without committing, while
+  recovery from an unavailable state remains snapshot-based. The 84-row proof
+  commits every row exactly once as `Polled` at sequences 85–168, leaves
+  sequence 168 unchanged on the next poll, and reconnects to the committed
+  polled snapshot. Focused verification passes 13 tests; `npm run verify`
+  passes 21 files and 100 tests plus typecheck, lint, and build; and the opt-in
+  persisted-Codex check passes in 8.20 seconds. A supplemental fallback audit
+  reports zero actionable findings. Ticket 04 remains claimed for a wholly
+  fresh generic review and independent product preflight; no maintainer
+  acceptance is claimed.

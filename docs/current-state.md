@@ -288,8 +288,23 @@ rows and commit sequence, and recovers through a bounded snapshot. Focused
 verification passes 26 tests; `npm run verify` passes 21 files and 99 tests plus
 typecheck, lint, and build; and the opt-in persisted-Codex check passes in 8.18
 seconds. A supplemental Effect/IPC audit reports zero actionable findings.
-Ticket 04 remains claimed for another wholly fresh generic review; independent
-product preflight remains paused until that review is clean.
+Fresh generic review pass 4 is clean on Specification and reports one P1
+Standards blocker: an 84-row maximum-field snapshot fits at 4,147,464 bytes,
+but its mandatory first polling update reaches 6,209,601 bytes because all 84
+identities changed from `Discovered` to `Polled`. Rejection preserves storage
+yet can repeat forever without unrelated source mutation. That blocker now has
+a red boundary regression and an ordered candidate fix: normal changes validate
+`SessionsUpdated` first, then use the equivalent bounded `SessionsSnapshot` if
+only its changed-identity envelope is too large. Neither fitting still produces
+`overview-unavailable` without commit, and unavailable recovery stays
+snapshot-based. The 84-row proof commits every row once as `Polled` at
+sequences 85–168, leaves sequence 168 unchanged on the next poll, and
+reconnects to the committed polled snapshot. Focused verification passes 13
+tests; `npm run verify` passes 21 files and 100 tests plus typecheck, lint, and
+build; and the opt-in persisted-Codex check passes in 8.20 seconds. A
+supplemental fallback audit reports zero actionable findings. Ticket 04 remains
+claimed for another wholly fresh generic review; product preflight stays paused
+until that review is clean.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 
