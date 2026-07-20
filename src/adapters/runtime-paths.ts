@@ -185,6 +185,13 @@ const secureNativePackWalkDataDirectory = (directory: string): void => {
   }
 }
 
+const requireSingleLinkDatabaseEntry = (path: string): void => {
+  const entry = statSync(path, { bigint: true })
+  if (!entry.isFile() || entry.nlink !== 1n) {
+    throw new Error("Durable database must have exactly one link")
+  }
+}
+
 const captureNativeDurablePath: DurablePathIdentifier = (path) => {
   let existingEntry: ReturnType<typeof lstatSync> | undefined
   try {
@@ -200,10 +207,15 @@ const captureNativeDurablePath: DurablePathIdentifier = (path) => {
       )
     }
     const resolvedDatabasePath = realpathSync.native(path)
+    requireSingleLinkDatabaseEntry(resolvedDatabasePath)
     return captureNativeDirectoryAuthority(
       dirname(resolvedDatabasePath),
       basename(resolvedDatabasePath),
     )
+  }
+
+  if (existingEntry !== undefined) {
+    requireSingleLinkDatabaseEntry(path)
   }
 
   return captureNativeDirectoryAuthority(

@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -41,6 +42,27 @@ const databaseAuthority = (
 
 const identifyAs = (authority: DurableDatabaseAuthority) => () => authority
 const identifyTestDatabase = identifyAs(databaseAuthority())
+
+const nativeRuntimeInput = (root: string): RuntimePathInputs => {
+  switch (process.platform) {
+    case "darwin":
+      return { platform: "darwin", homeDirectory: root }
+    case "linux":
+      return {
+        platform: "linux",
+        homeDirectory: root,
+        xdgDataHome: root,
+      }
+    case "win32":
+      return {
+        platform: "win32",
+        homeDirectory: root,
+        localAppData: root,
+      }
+    default:
+      throw new Error("Unsupported test platform")
+  }
+}
 
 describe("PackWalk runtime paths", () => {
   it("uses per-user local data and a Unix socket on macOS", () => {
@@ -237,6 +259,63 @@ describe("PackWalk runtime paths", () => {
       ),
     ).toThrow("Native directory identity is unavailable")
   })
+
+  it.effect(
+    "rejects hard-linked database entries during resolution and revalidation",
+    () => {
+      const firstRoot = mkdtempSync(join(tmpdir(), "packwalk-hard-link-a-"))
+      const secondRoot = mkdtempSync(join(tmpdir(), "packwalk-hard-link-b-"))
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            rmSync(firstRoot, { recursive: true, force: true })
+            rmSync(secondRoot, { recursive: true, force: true })
+          }),
+        )
+        const firstPaths = deriveRuntimePaths(
+          nativeRuntimeInput(firstRoot),
+          identifyNativeDurablePath,
+        )
+        const secondPaths = deriveRuntimePaths(
+          nativeRuntimeInput(secondRoot),
+          identifyNativeDurablePath,
+        )
+        writeFileSync(firstPaths.packWalkDatabasePath, "database")
+        linkSync(
+          firstPaths.packWalkDatabasePath,
+          secondPaths.packWalkDatabasePath,
+        )
+
+        const firstEntry = statSync(firstPaths.packWalkDatabasePath)
+        const secondEntry = statSync(secondPaths.packWalkDatabasePath)
+        expect(firstPaths.ipcEndpoint).not.toBe(secondPaths.ipcEndpoint)
+        expect({
+          deviceId: firstEntry.dev,
+          fileId: firstEntry.ino,
+          linkCount: firstEntry.nlink,
+        }).toEqual({
+          deviceId: secondEntry.dev,
+          fileId: secondEntry.ino,
+          linkCount: 2,
+        })
+        expect(() =>
+          identifyNativeDurablePath(firstPaths.packWalkDatabasePath),
+        ).toThrow("Durable database must have exactly one link")
+        expect(() =>
+          identifyNativeDurablePath(secondPaths.packWalkDatabasePath),
+        ).toThrow("Durable database must have exactly one link")
+
+        const failure = yield* verifyRuntimeAuthority(firstPaths).pipe(
+          Effect.flip,
+        )
+        expect(failure).toMatchObject({
+          _tag: "PackWalk.RuntimePathError",
+          message: "PackWalk database authority changed",
+        })
+      }).pipe(Effect.scoped)
+    },
+  )
 
   it.skipIf(process.platform === "win32")(
     "uses one endpoint for physical database aliases before and after the database exists",

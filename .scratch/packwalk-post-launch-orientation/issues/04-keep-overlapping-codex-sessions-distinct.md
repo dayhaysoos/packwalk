@@ -243,3 +243,30 @@ sessions overlap, share a repository, or have duplicate display labels.
   endpoint-owning v2 PID 32103 was stopped after the exercise; pre-existing v1
   PID 77857 remains running and untouched. Ticket 04 remains claimed for a
   wholly fresh generic review; product preflight remains paused.
+- 2026-07-20: Fresh generic review pass 7 reports zero actionable
+  Specification findings and one P1 Standards blocker. Two private database
+  directories can hard-link one existing `packwalk-v2.sqlite` inode yet derive
+  different daemon endpoints; separate writers could then open the same main
+  file through different pathnames with different adjacent WAL/SHM files.
+  Ticket 04 remains claimed while a native-filesystem regression proves the
+  split and both initial resolution and capture-only revalidation reject any
+  existing database target whose link count is not exactly one. Full
+  verification and an entirely fresh generic review follow; product preflight
+  remains paused.
+- 2026-07-20: Pass 7's hard-link P1 is repaired with a native-filesystem
+  regression that first proved two endpoint authorities around one inode.
+  Every existing database entry must now be a regular file with native link
+  count exactly one, whether addressed directly or through a qualified final
+  symlink; capture-only revalidation enforces the same rule. Missing databases
+  still anchor to their private parent directory, and atomic replacement keeps
+  endpoint authority stable. Focused runtime/build verification passes 25
+  tests. Full verification and an entirely fresh generic review remain
+  pending; product preflight stays paused.
+- 2026-07-20: Full post-hard-link verification is green: `npm run verify`
+  passes 21 files and 110 tests plus typecheck, lint, and build; the opt-in
+  persisted-Codex check passes in 4.13 seconds. Rebuilt JSON and text clients
+  each exit zero with empty stderr and contain all 19 unique exact identities;
+  JSON is a protocol-v2 `SessionsSnapshot`. The positively identified v2
+  endpoint owner PID 98474 was stopped, and pre-existing v1 PID 77857 remains
+  running and untouched. Ticket 04 remains claimed for a wholly fresh generic
+  review; product preflight remains paused.

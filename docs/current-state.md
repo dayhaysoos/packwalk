@@ -344,8 +344,23 @@ and the persisted-Codex check passes in 4.13 seconds. Rebuilt public JSON and
 text clients each exited zero with empty stderr and returned all 19 unique exact
 identities; JSON was a protocol-v2 `SessionsSnapshot`. The positively
 identified endpoint-owning v2 PID 32103 was stopped, while pre-existing v1 PID
-77857 remains running and untouched. Ticket 04 remains claimed for an entirely
-fresh generic review; product preflight remains paused.
+77857 remains running and untouched. Fresh generic review pass 7 reports zero
+actionable Specification findings and one P1 Standards blocker: two private
+directories can hard-link one existing `packwalk-v2.sqlite` inode while
+deriving different daemon endpoints and adjacent WAL/SHM paths. Ticket 04
+repairs that P1 with a native-filesystem regression that first proves the
+split. Existing direct database entries and qualified final-symlink targets
+must now be regular files with native link count exactly one, and capture-only
+revalidation enforces the same rule. Missing databases still anchor to the
+private parent directory, while atomic replacement keeps endpoint authority
+stable. Focused runtime/build verification passes 25 tests. Ticket 04 remains
+claimed after `npm run verify` passes 21 files and 110 tests plus typecheck,
+lint, and build, and the persisted-Codex check passes in 4.13 seconds. Rebuilt
+JSON and text clients each exited zero with empty stderr and returned all 19
+unique exact identities; JSON was a protocol-v2 `SessionsSnapshot`. The
+positively identified v2 endpoint owner PID 98474 was stopped, while
+pre-existing v1 PID 77857 remains running and untouched. An entirely fresh
+generic review remains required; product preflight remains paused.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 
