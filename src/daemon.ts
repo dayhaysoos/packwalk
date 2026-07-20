@@ -10,13 +10,13 @@ import {
 import {
   codexSourceLayer,
   layer as sqliteSessionStorageLayer,
-  prepareVersionedStorage,
 } from "./adapters/sqlite-session-storage.js"
+import { Service as SessionStorage } from "./application/session-storage.js"
 import {
   sessionDaemonLayerFromServer,
   Service as SessionDaemon,
 } from "./daemon/session-runtime.js"
-import { claimSessionDaemon } from "./daemon/endpoint-ownership.js"
+import { claimSessionDaemonEndpoint } from "./daemon/endpoint-ownership.js"
 
 const daemonProgram = Effect.scoped(
   Effect.gen(function* () {
@@ -24,23 +24,25 @@ const daemonProgram = Effect.scoped(
     yield* prepareRuntimeDirectories
     yield* verifyRuntimeAuthority(paths)
 
-    const endpointClaim = yield* claimSessionDaemon({
-      authorityEndpoint: paths.daemonLockEndpoint,
-      transportEndpoint: paths.ipcEndpoint,
-    })
+    const storageContext = yield* Layer.build(
+      sqliteSessionStorageLayer(
+        paths.packWalkDatabasePath,
+        paths.legacyPackWalkDatabasePath,
+      ),
+    )
+    const storage = Context.get(storageContext, SessionStorage)
+
+    const endpointClaim = yield* claimSessionDaemonEndpoint(
+      paths.ipcEndpoint,
+    )
     yield* verifyRuntimeAuthority(paths)
     if (endpointClaim._tag === "AlreadyRunning") {
       return
     }
 
-    yield* prepareVersionedStorage(
-      paths.legacyPackWalkDatabasePath,
-      paths.packWalkDatabasePath,
-    )
-
     const dependencies = Layer.mergeAll(
       codexSourceLayer(paths.codexDatabasePath),
-      sqliteSessionStorageLayer(paths.packWalkDatabasePath),
+      Layer.succeed(SessionStorage, storage),
     )
     const daemonContext = yield* Layer.build(
       sessionDaemonLayerFromServer(endpointClaim.server).pipe(

@@ -17,7 +17,6 @@ import { Service as SessionStorage } from "../src/application/session-storage.js
 import {
   completeSqliteBackup,
   layer as sqliteSessionStorageLayer,
-  prepareVersionedStorage,
 } from "../src/adapters/sqlite-session-storage.js"
 import {
   ProjectIdentity,
@@ -169,7 +168,14 @@ it.effect("preserves a valid legacy session with a checked migration and SQLite 
     const legacyRow = { ...validRow, commitSequence: 7 }
     yield* Effect.sync(() => seedLooseSessionTable(path, legacyRow))
 
-    const context = yield* Layer.build(sqliteSessionStorageLayer(path))
+    const storageScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() =>
+      Scope.close(storageScope, Exit.void),
+    )
+    const context = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(path),
+      storageScope,
+    )
     const storage = Context.get(context, SessionStorage)
 
     expect(yield* storage.load()).toEqual({
@@ -189,6 +195,7 @@ it.effect("preserves a valid legacy session with a checked migration and SQLite 
       ],
       lastCommitSequence: 7,
     })
+    yield* Scope.close(storageScope, Exit.void)
 
     const migrated = new DatabaseSync(path, { readOnly: true })
     try {
@@ -267,8 +274,9 @@ it.effect("imports legacy state without taking its database away from an older d
       (database) => Effect.sync(() => database.close()),
     )
 
-    yield* prepareVersionedStorage(legacyPath, currentPath)
-    const context = yield* Layer.build(sqliteSessionStorageLayer(currentPath))
+    const context = yield* Layer.build(
+      sqliteSessionStorageLayer(currentPath, legacyPath),
+    )
     const storage = Context.get(context, SessionStorage)
     const imported = yield* storage.load()
     expect(imported.lastCommitSequence).toBe(7)
@@ -343,10 +351,9 @@ it.effect.skipIf(process.platform === "win32")(
       )
 
       const startup = yield* Effect.result(
-        Effect.gen(function* () {
-          yield* prepareVersionedStorage(legacyPath, currentPath)
-          yield* Layer.build(sqliteSessionStorageLayer(currentPath))
-        }),
+        Layer.build(
+          sqliteSessionStorageLayer(currentPath, legacyPath),
+        ),
       )
 
       expect(Result.isFailure(startup)).toBe(true)
@@ -393,8 +400,9 @@ it.effect("imports committed legacy WAL state while the old writer remains activ
     expect(existsSync(`${legacyPath}-wal`)).toBe(true)
     expect(existsSync(`${legacyPath}-shm`)).toBe(true)
 
-    yield* prepareVersionedStorage(legacyPath, currentPath)
-    const context = yield* Layer.build(sqliteSessionStorageLayer(currentPath))
+    const context = yield* Layer.build(
+      sqliteSessionStorageLayer(currentPath, legacyPath),
+    )
     const storage = Context.get(context, SessionStorage)
     const imported = yield* storage.load()
     expect(imported.views[0]).toMatchObject({
@@ -467,8 +475,9 @@ it.effect("resumes import when a retained migration backup already exists", () =
       seedLooseSessionTable(retainedBackupPath, retainedRow)
     })
 
-    yield* prepareVersionedStorage(legacyPath, currentPath)
-    const context = yield* Layer.build(sqliteSessionStorageLayer(currentPath))
+    const context = yield* Layer.build(
+      sqliteSessionStorageLayer(currentPath, legacyPath),
+    )
     const storage = Context.get(context, SessionStorage)
 
     expect(yield* storage.load()).toEqual({
@@ -519,7 +528,12 @@ it.effect("never overwrites an existing versioned database with stale legacy sta
     )
     const legacyPath = join(directory, "packwalk.sqlite")
     const currentPath = join(directory, "packwalk-v2.sqlite")
-    const context = yield* Layer.build(sqliteSessionStorageLayer(currentPath))
+    const firstScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    const context = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(currentPath),
+      firstScope,
+    )
     const storage = Context.get(context, SessionStorage)
     const currentView = makeSessionView(
       "019f77d2-1a10-7cf0-b5df-76eebb4071cc",
@@ -535,17 +549,20 @@ it.effect("never overwrites an existing versioned database with stale legacy sta
         commitSequence: 7,
       }),
     )
+    yield* Scope.close(firstScope, Exit.void)
 
-    yield* prepareVersionedStorage(legacyPath, currentPath)
-
-    expect(yield* storage.load()).toEqual({
+    const reopenedContext = yield* Layer.build(
+      sqliteSessionStorageLayer(currentPath, legacyPath),
+    )
+    const reopened = Context.get(reopenedContext, SessionStorage)
+    expect(yield* reopened.load()).toEqual({
       views: [currentView],
       lastCommitSequence: 1,
     })
   }),
 )
 
-it.effect("removes import staging and leaves no current database when import fails", () =>
+it.effect("removes import staging and leaves a retryable current database when import fails", () =>
   Effect.gen(function* () {
     const directory = yield* Effect.acquireRelease(
       Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-failed-import-test-"))),
@@ -561,14 +578,16 @@ it.effect("removes import staging and leaves no current database when import fai
     )
 
     const error = yield* Effect.flip(
-      prepareVersionedStorage(legacyPath, currentPath),
+      Layer.build(
+        sqliteSessionStorageLayer(currentPath, legacyPath),
+      ),
     )
 
     expect(error).toMatchObject({
       operation: "SessionStorage.open",
       message: "PackWalk could not open its session storage",
     })
-    expect(readdirSync(directory)).not.toContain("packwalk-v2.sqlite")
+    expect(readdirSync(directory)).toContain("packwalk-v2.sqlite")
     expect(
       readdirSync(directory).filter((name) =>
         name.startsWith("packwalk-v2.sqlite.import-"),
@@ -577,7 +596,7 @@ it.effect("removes import staging and leaves no current database when import fai
   }),
 )
 
-it.effect("closes a partially configured legacy import connection", () =>
+it.effect("closes both owned and import connections when import acquisition fails", () =>
   Effect.gen(function* () {
     const directory = yield* Effect.acquireRelease(
       Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-import-close-test-"))),
@@ -589,14 +608,14 @@ it.effect("closes a partially configured legacy import connection", () =>
 
     const originalEnableDefensive = DatabaseSync.prototype.enableDefensive
     const originalClose = DatabaseSync.prototype.close
-    let failNextHardening = true
+    let hardeningCalls = 0
     let closeCount = 0
     DatabaseSync.prototype.enableDefensive = function(
       this: DatabaseSync,
       active: boolean,
     ) {
-      if (failNextHardening) {
-        failNextHardening = false
+      hardeningCalls += 1
+      if (hardeningCalls === 2) {
         throw new Error("synthetic hardening failure")
       }
       return originalEnableDefensive.call(this, active)
@@ -608,7 +627,9 @@ it.effect("closes a partially configured legacy import connection", () =>
 
     try {
       const error = yield* Effect.flip(
-        prepareVersionedStorage(legacyPath, currentPath),
+        Layer.build(
+          sqliteSessionStorageLayer(currentPath, legacyPath),
+        ),
       )
       expect(error).toMatchObject({
         operation: "SessionStorage.open",
@@ -619,8 +640,8 @@ it.effect("closes a partially configured legacy import connection", () =>
       DatabaseSync.prototype.close = originalClose
     }
 
-    expect(closeCount).toBe(1)
-    expect(readdirSync(directory)).not.toContain("packwalk-v2.sqlite")
+    expect(closeCount).toBe(2)
+    expect(readdirSync(directory)).toContain("packwalk-v2.sqlite")
     expect(
       readdirSync(directory).filter((name) =>
         name.startsWith("packwalk-v2.sqlite.import-"),
@@ -790,5 +811,119 @@ it.effect("keeps one storage connection for the scope and closes it at finalizat
       yield* Scope.close(scope, Exit.void)
       DatabaseSync.prototype.close = originalClose
     }
+  }),
+)
+
+it.effect("retains sole-writer authority across commits until its storage scope closes", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-owner-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk.sqlite")
+    const firstScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    const firstContext = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(path),
+      firstScope,
+    )
+    const firstStorage = Context.get(firstContext, SessionStorage)
+    const first = makeSessionView(
+      "019f77d2-1a10-7cf0-b5df-76eebb4071cc",
+      1,
+      1_000,
+      2_000,
+    )
+    const second = makeSessionView(
+      "019f77d2-1a10-7cf0-b5df-76eebb4071dd",
+      2,
+      1_500,
+      2_500,
+    )
+
+    yield* firstStorage.commit(0, [first])
+    const competing = yield* Effect.promise(() =>
+      Effect.runPromiseExit(
+        Effect.scoped(
+          Layer.build(Layer.fresh(sqliteSessionStorageLayer(path))),
+        ),
+      ),
+    )
+    expect(Exit.isFailure(competing)).toBe(true)
+
+    yield* firstStorage.commit(1, [second])
+    expect(yield* firstStorage.load()).toEqual({
+      views: [first, second],
+      lastCommitSequence: 2,
+    })
+
+    yield* Scope.close(firstScope, Exit.void)
+    const replacementContext = yield* Layer.build(
+      Layer.fresh(sqliteSessionStorageLayer(path)),
+    )
+    const replacementStorage = Context.get(
+      replacementContext,
+      SessionStorage,
+    )
+    expect(yield* replacementStorage.load()).toEqual({
+      views: [first, second],
+      lastCommitSequence: 2,
+    })
+  }),
+)
+
+it.effect("serializes first-start legacy import under the retained storage authority", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-first-start-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const legacyPath = join(directory, "packwalk.sqlite")
+    const currentPath = join(directory, "packwalk-v2.sqlite")
+    const legacyRow = { ...validRow, commitSequence: 7 }
+    yield* Effect.sync(() => seedLooseSessionTable(legacyPath, legacyRow))
+
+    const firstScope = yield* Scope.make()
+    const secondScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
+    const starts = yield* Effect.promise(() =>
+      Promise.all(
+        [firstScope, secondScope].map((scope) =>
+          Effect.runPromiseExit(
+            Layer.buildWithScope(
+              Layer.fresh(
+                sqliteSessionStorageLayer(currentPath, legacyPath),
+              ),
+              scope,
+            ),
+          ),
+        ),
+      ),
+    )
+    const owners = starts.filter(Exit.isSuccess)
+    expect(owners).toHaveLength(1)
+    if (owners[0] === undefined || Exit.isFailure(owners[0])) {
+      return yield* Effect.die("Expected one first-start storage owner")
+    }
+
+    const storage = Context.get(owners[0].value, SessionStorage)
+    expect(yield* storage.load()).toEqual({
+      views: [
+        {
+          protocolVersion: legacyRow.protocolVersion,
+          sessionId: legacyRow.sessionId,
+          projectIdentity: legacyRow.projectIdentity,
+          activity: legacyRow.activity,
+          evidenceSource: legacyRow.evidenceSource,
+          state: { _tag: legacyRow.stateTag },
+          freshness: legacyRow.freshness,
+          sourceUpdatedAtMs: legacyRow.sourceUpdatedAtMs,
+          observedAtMs: legacyRow.observedAtMs,
+          commitSequence: legacyRow.commitSequence,
+        },
+      ],
+      lastCommitSequence: legacyRow.commitSequence,
+    })
   }),
 )

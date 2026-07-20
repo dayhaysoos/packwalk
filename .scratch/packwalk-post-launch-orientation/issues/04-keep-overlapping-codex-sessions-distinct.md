@@ -362,3 +362,62 @@ sessions overlap, share a repository, or have duplicate display labels.
   transport sockets and was stopped cleanly; pre-existing v1 PID 77857 remains
   running and untouched. Ticket 04 remains claimed for a wholly fresh generic
   review; product preflight stays paused.
+- 2026-07-20: Fresh generic review pass 10 reports zero actionable
+  Specification findings and one P1 Standards blocker in writer ownership. A
+  live filesystem socket can be unlinked without closing its listener; after
+  both authority and transport entries are removed, a second composed claim
+  returns `Owned` while the first remains active. Ticket 04 remains claimed
+  while that exact red regression replaces pathname authority with a dedicated
+  SQLite lock file whose scoped connection holds an exclusive transaction for
+  the daemon lifetime. Sockets return to transport/liveness only. Full
+  verification and wholly fresh generic review follow; product preflight
+  remains paused.
+- 2026-07-20: Pass 10's replaceable-path authority P1 is repaired red-first.
+  Runtime paths now derive a dedicated identity-keyed SQLite lock file beside
+  the qualified v2 database on every supported platform. Before transport or
+  storage, the daemon retains a scoped `BEGIN EXCLUSIVE` connection; a busy
+  lock exits as `AlreadyRunning`, while ordinary Unix socket removal or
+  directory replacement can only create another transport listener. Direct
+  regressions prove one owner under contention, release on scope close,
+  physical macOS firmlink convergence, and fail-closed symlink and hard-link
+  entries. Typecheck and 33 focused authority, endpoint, and runtime-path tests
+  pass. Full verification and wholly fresh generic review remain pending;
+  product preflight stays paused.
+- 2026-07-20: A targeted follow-up audit rejects that first SQLite-lock repair
+  before checkpoint. On Unix, unlinking the lock database preserves the first
+  connection's inode lock but lets a second claim create a new file at the same
+  pathname and also return `Owned`. The separate `node:sqlite` authority module
+  also contradicts ADR 0007's accepted single storage adapter and connection
+  owner. Ticket 04 remains claimed while the exact pathname-removal case drives
+  a retained kernel authority with no filesystem election pathname and no
+  second SQLite connection. The earlier 33-test result is not an acceptance
+  verdict. Full verification and fresh review remain required; product
+  preflight stays paused.
+- 2026-07-20: The follow-up authority blocker is repaired at the domain-store
+  seam without reopening the specification's no-TCP rule. The one scoped
+  authoritative `DatabaseSync` now enters verified exclusive locking mode and
+  forces acquisition before first-start import, transport, workers, or
+  publication. Legacy state is snapshotted and transactionally copied into
+  that already-open current database; the unsafe staged-main rename path is
+  removed. Exact regressions prove one winner during two concurrent missing-v2
+  starts, continued commits after a loser fails, clean ownership transfer after
+  scope close, native macOS alias convergence, and storage refusal after the
+  Unix transport directory or live socket is replaced. Typecheck and 44
+  focused storage, transport, and runtime-path tests pass. Deliberate same-user
+  deletion or replacement of PackWalk's authoritative database file is not
+  claimed as a security boundary. Full verification and wholly fresh generic
+  review remain pending; product preflight stays paused.
+- 2026-07-20: Post-repair qualification is green. `npm run verify` passes 22
+  files and 117 tests plus typecheck, lint, and build; a static architecture
+  law keeps `node:sqlite` inside the approved source adapter, and the opt-in
+  persisted-Codex check passes in 8.23 seconds. An isolated compiled daemon was
+  the sole open owner of its v2 database. Independent ordinary and
+  transport-unlinked contenders both exited 1 with no output while that owner
+  stayed alive; after its deliberate `SIGKILL`, a successor acquired the same
+  endpoint and restored both exact same-project sessions. The installed JSON
+  and text clients then returned 19 distinct exact identities, including two
+  in one project, with zero command errors. Positively identified v2 PID 2155
+  owned the production v2 database and endpoint and was stopped; pre-existing
+  v1 PID 77857 remains alive and untouched. Ticket 04 remains claimed only for
+  a wholly fresh generic review and independent product preflight; no
+  maintainer acceptance is claimed.

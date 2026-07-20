@@ -62,8 +62,6 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
       (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
     )
     const path = join(directory, "packwalk.sqlite")
-    const context = yield* Layer.build(sqliteSessionStorageLayer(path))
-    const storage = Context.get(context, SessionStorage)
     const sessionId = yield* Schema.decodeUnknownEffect(SessionIdentity)(
       rawSessionIdentity,
     )
@@ -71,20 +69,27 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
       rawProjectIdentity,
     )
 
-    yield* storage.commit(0, [
-      SessionView.make({
-        protocolVersion: 1,
-        sessionId,
-        projectIdentity,
-        activity: "persisted Codex activity",
-        evidenceSource: "codex-sqlite-thread-index",
-        state: SessionState.cases.Discovered.make({}),
-        freshness: "fresh",
-        sourceUpdatedAtMs: 1_000,
-        observedAtMs: 2_000,
-        commitSequence: 1,
+    const loaded = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(sqliteSessionStorageLayer(path))
+        const storage = Context.get(context, SessionStorage)
+        yield* storage.commit(0, [
+          SessionView.make({
+            protocolVersion: 1,
+            sessionId,
+            projectIdentity,
+            activity: "persisted Codex activity",
+            evidenceSource: "codex-sqlite-thread-index",
+            state: SessionState.cases.Discovered.make({}),
+            freshness: "fresh",
+            sourceUpdatedAtMs: 1_000,
+            observedAtMs: 2_000,
+            commitSequence: 1,
+          }),
+        ])
+        return yield* storage.load()
       }),
-    ])
+    )
 
     const database = new DatabaseSync(path, { readOnly: true })
     const row = database
@@ -96,7 +101,6 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
       project_identity: rawProjectIdentity,
     })
 
-    const loaded = yield* storage.load()
     const loadedView = loaded.views[0]
     if (loadedView === undefined) {
       return yield* Effect.die("Expected one stored session view")

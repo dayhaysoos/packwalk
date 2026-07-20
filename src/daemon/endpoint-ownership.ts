@@ -17,20 +17,13 @@ export type SessionDaemonEndpointClaim =
       readonly _tag: "AlreadyRunning"
     }
 
-export interface SessionDaemonEndpoints {
-  readonly authorityEndpoint: string
-  readonly transportEndpoint: string
-}
-
 const endpointAcceptsConnections = (endpoint: string) =>
   Effect.callback<boolean>((resume) => {
     const socket = Net.createConnection({ path: endpoint })
     let settled = false
 
     const finish = (acceptsConnections: boolean) => {
-      if (settled) {
-        return
-      }
+      if (settled) return
       settled = true
       socket.destroy()
       resume(Effect.succeed(acceptsConnections))
@@ -47,10 +40,9 @@ const endpointAcceptsConnections = (endpoint: string) =>
   })
 
 /**
- * Uses the local endpoint bind as the daemon's atomic ownership primitive.
- * A failed bind never removes an endpoint: an accepting endpoint belongs to
- * the running daemon, while a non-accepting endpoint fails safely for later
- * recovery work.
+ * Claims only the local client transport. The already-acquired scoped storage
+ * connection owns daemon writer election; replacing this endpoint can make
+ * delivery unavailable but cannot create another storage owner.
  */
 export const claimSessionDaemonEndpoint = (
   endpoint: string,
@@ -70,42 +62,4 @@ export const claimSessionDaemonEndpoint = (
     }
 
     return yield* claim.failure
-  })
-
-/**
- * Retains a database-authority listener for the daemon scope before claiming
- * the replaceable client transport endpoint. The authority endpoint must be
- * anchored to the durable database identity rather than its transport
- * directory.
- */
-export const claimSessionDaemon = ({
-  authorityEndpoint,
-  transportEndpoint,
-}: SessionDaemonEndpoints): Effect.Effect<
-  SessionDaemonEndpointClaim,
-  LocalIpcError,
-  Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const authorityClaim = yield* claimSessionDaemonEndpoint(
-      authorityEndpoint,
-    )
-    if (authorityClaim._tag === "AlreadyRunning") {
-      return authorityClaim
-    }
-
-    yield* authorityClaim.server
-      .run(() => Effect.void)
-      .pipe(
-        Effect.mapError(
-          () =>
-            new LocalIpcError({
-              code: "transport-unavailable",
-              message: "PackWalk could not retain daemon writer authority",
-            }),
-        ),
-        Effect.forkScoped,
-      )
-
-    return yield* claimSessionDaemonEndpoint(transportEndpoint)
   })

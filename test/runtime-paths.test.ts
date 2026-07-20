@@ -17,7 +17,7 @@ import { join } from "node:path"
 
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Result } from "effect"
+import { ConfigProvider, Effect, Exit, Layer, Result } from "effect"
 
 import {
   type DurableDatabaseAuthority,
@@ -29,7 +29,7 @@ import {
   runtimePathsLayer,
   verifyRuntimeAuthority,
 } from "../src/adapters/runtime-paths.js"
-import { claimSessionDaemonEndpoint } from "../src/daemon/endpoint-ownership.js"
+import { layer as sqliteSessionStorageLayer } from "../src/adapters/sqlite-session-storage.js"
 
 const databaseAuthority = (
   fileId: bigint = 1n,
@@ -96,45 +96,23 @@ describe("PackWalk runtime paths", () => {
     )
   })
 
-  it("keeps an ordinary macOS writer-authority socket within its native limit", () => {
+  it("keeps the Unix client endpoint independent of durable path length", () => {
+    const authorityDirectory = `/${"a".repeat(103)}`
     const paths = deriveRuntimePaths(
       {
-        platform: "darwin",
-        homeDirectory: "/Users/nickdejesus",
+        platform: "linux",
+        homeDirectory: "/home/example",
       },
       identifyAs(
         databaseAuthority(
           1n,
           "packwalk-v2.sqlite",
-          "/Users/nickdejesus/Library/Application Support/PackWalk",
+          authorityDirectory,
         ),
       ),
     )
 
-    expect(Buffer.byteLength(paths.daemonLockEndpoint)).toBeLessThanOrEqual(
-      103,
-    )
-    expect(paths.daemonLockEndpoint).toMatch(
-      /\/\.pw-[A-Za-z0-9_-]{16}$/,
-    )
-  })
-
-  it("rejects an overlong Unix writer-authority path before socket bind", () => {
-    expect(() =>
-      deriveRuntimePaths(
-        {
-          platform: "linux",
-          homeDirectory: "/home/example",
-        },
-        identifyAs(
-          databaseAuthority(
-            1n,
-            "packwalk-v2.sqlite",
-            `/${"a".repeat(103)}`,
-          ),
-        ),
-      ),
-    ).toThrow("Daemon writer-authority path exceeds the Unix socket limit")
+    expect(paths.ipcEndpoint.length).toBeLessThan(100)
   })
 
   it("honors XDG directories on Linux", () => {
@@ -173,7 +151,13 @@ describe("PackWalk runtime paths", () => {
         localAppData: "D:\\LocalData",
         codexHome: "D:\\Codex",
       },
-      identifyTestDatabase,
+      identifyAs(
+        databaseAuthority(
+          1n,
+          "packwalk-v2.sqlite",
+          "D:\\LocalData\\PackWalk",
+        ),
+      ),
     )
 
     expect(paths.codexDatabasePath).toBe("D:\\Codex\\state_5.sqlite")
@@ -529,27 +513,23 @@ describe("PackWalk runtime paths", () => {
           physical.packWalkDatabasePath,
         )
         expect(firmlink.ipcEndpoint).toBe(physical.ipcEndpoint)
-        expect(firmlink.daemonLockEndpoint).not.toBe(
-          physical.daemonLockEndpoint,
+        yield* Layer.build(
+          sqliteSessionStorageLayer(physical.packWalkDatabasePath),
         )
-        expect(
-          Buffer.byteLength(firmlink.daemonLockEndpoint),
-        ).toBeLessThanOrEqual(103)
-
-        const owner = yield* claimSessionDaemonEndpoint(
-          physical.daemonLockEndpoint,
+        const competing = yield* Effect.promise(() =>
+          Effect.runPromiseExit(
+            Effect.scoped(
+              Layer.build(
+                Layer.fresh(
+                  sqliteSessionStorageLayer(
+                    firmlink.packWalkDatabasePath,
+                  ),
+                ),
+              ),
+            ),
+          ),
         )
-        expect(owner._tag).toBe("Owned")
-        if (owner._tag !== "Owned") {
-          return yield* Effect.die("Expected physical writer authority")
-        }
-        yield* owner.server
-          .run(() => Effect.void)
-          .pipe(Effect.forkScoped)
-
-        expect(
-          (yield* claimSessionDaemonEndpoint(firmlink.daemonLockEndpoint))._tag,
-        ).toBe("AlreadyRunning")
+        expect(Exit.isFailure(competing)).toBe(true)
       }).pipe(Effect.provide(NodeServices.layer))
     },
   )
@@ -722,7 +702,6 @@ describe("PackWalk runtime paths", () => {
                 "packwalk-v2.sqlite",
               ),
               packWalkDatabaseAuthority: databaseAuthority(),
-              daemonLockEndpoint: join(testRoot, "data", "writer.sock"),
               ipcDirectory,
               ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
             }),
@@ -756,7 +735,6 @@ describe("PackWalk runtime paths", () => {
           "packwalk-v2.sqlite",
         ),
         packWalkDatabaseAuthority: databaseAuthority(),
-        daemonLockEndpoint: join(dataDirectory, "writer.sock"),
         ipcDirectory,
         ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
       })

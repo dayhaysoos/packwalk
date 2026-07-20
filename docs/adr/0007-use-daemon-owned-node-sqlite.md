@@ -17,14 +17,32 @@ Transaction callbacks are synchronous and bounded: they execute no Effect,
 Promise, Codex call, IPC operation, publication, exporter, or other external
 side effect.
 
+That same authoritative connection is also daemon writer election. Before any
+schema, import, worker, or transport acquisition, it sets
+`locking_mode=EXCLUSIVE`, forces lock acquisition with a no-op immediate
+transaction, enters WAL, verifies its settings, and retains the resulting file
+lock for the Layer scope. A second daemon fails storage acquisition visibly; a
+generic busy result is not reclassified as proof that a healthy daemon exists.
+The client Unix socket or Windows named pipe is transport and liveness only.
+
 The database lives in PackWalk's platform-specific local application-data
-directory, never on a network filesystem. Every connection explicitly enables
-and verifies foreign keys, defensive mode, extension prohibition, busy timeout,
-integer behavior, WAL, and `synchronous=FULL`. Authoritative commands that may
-write use `BEGIN IMMEDIATE`; read-only queries do not reserve the writer.
+directory, never on a network filesystem. The authoritative connection
+explicitly enables and verifies exclusive locking, foreign keys, defensive
+mode, extension prohibition, busy timeout, integer behavior, WAL, and
+`synchronous=FULL`. Authoritative commands that may write use
+`BEGIN IMMEDIATE`; read-only queries do not start an additional write
+transaction.
 Portable, repository-owned migrations are immutable, ordered, checksummed,
 forward-only, and transactionally applied. They do not depend on
 driver-specific behavior.
+
+Versioned first-start import occurs only after the current database connection
+owns its exclusive lock. The adapter snapshots the still-independent legacy
+database, validates and retains that backup, and transactionally populates the
+already-open current database. It never renames another main database inode
+over the owned path. A crash before import commit leaves a fresh current
+database that can retry from the live legacy database; the retained backup
+remains separately validated recovery evidence.
 
 An authoritative transition and its projection commit before PackWalk
 publishes, notifies, reports success, or permits external dispatch. A Codex call

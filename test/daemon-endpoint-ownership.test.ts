@@ -12,12 +12,10 @@ import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Result, Stream } from "effect"
+import { Effect, Exit, Layer, Result, Stream } from "effect"
 
-import {
-  claimSessionDaemon,
-  claimSessionDaemonEndpoint,
-} from "../src/daemon/endpoint-ownership.js"
+import { layer as sqliteSessionStorageLayer } from "../src/adapters/sqlite-session-storage.js"
+import { claimSessionDaemonEndpoint } from "../src/daemon/endpoint-ownership.js"
 import { runSessionEventServer } from "../src/adapters/local-session-ipc.js"
 
 const endpointIn = (directory: string): string =>
@@ -60,25 +58,23 @@ it.effect("elects exactly one daemon endpoint owner when starts compete", () =>
 )
 
 it.effect.skipIf(process.platform === "win32")(
-  "retains database writer authority when the transport directory is replaced",
+  "keeps storage single-writer when the transport directory is replaced",
   () =>
     Effect.gen(function* () {
       const testRoot = mkdtempSync(join(tmpdir(), "packwalk-authority-test-"))
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
       )
-      const authorityDirectory = join(testRoot, "durable")
       const transportDirectory = join(testRoot, "transport")
       const movedTransportDirectory = join(testRoot, "moved-transport")
-      mkdirSync(authorityDirectory)
       mkdirSync(transportDirectory)
-      const authorityEndpoint = join(authorityDirectory, "writer.sock")
+      const storagePath = join(testRoot, "packwalk.sqlite")
       const transportEndpoint = join(transportDirectory, "daemon.sock")
+      yield* Layer.build(sqliteSessionStorageLayer(storagePath))
 
-      const first = yield* claimSessionDaemon({
-        authorityEndpoint,
+      const first = yield* claimSessionDaemonEndpoint(
         transportEndpoint,
-      })
+      )
       expect(first._tag).toBe("Owned")
       if (first._tag !== "Owned") {
         return yield* Effect.die("Expected the first daemon to own authority")
@@ -93,14 +89,56 @@ it.effect.skipIf(process.platform === "win32")(
         (yield* claimSessionDaemonEndpoint(transportEndpoint))._tag,
       ).toBe("Owned")
 
+      const competingStorage = yield* Effect.promise(() =>
+        Effect.runPromiseExit(
+          Effect.scoped(
+            Layer.build(
+              Layer.fresh(sqliteSessionStorageLayer(storagePath)),
+            ),
+          ),
+        ),
+      )
+      expect(Exit.isFailure(competingStorage)).toBe(true)
+    }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect.skipIf(process.platform === "win32")(
+  "keeps storage single-writer when a live transport socket is removed",
+  () =>
+    Effect.gen(function* () {
+      const testRoot = mkdtempSync(join(tmpdir(), "pw-unlink-test-"))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+      )
+      const storagePath = join(testRoot, "packwalk.sqlite")
+      const transportEndpoint = join(testRoot, "daemon.sock")
+      yield* Layer.build(sqliteSessionStorageLayer(storagePath))
+      const first = yield* claimSessionDaemonEndpoint(
+        transportEndpoint,
+      )
+      expect(first._tag).toBe("Owned")
+      if (first._tag !== "Owned") {
+        return yield* Effect.die("Expected the first daemon to own authority")
+      }
+      yield* runSessionEventServer(first.server, Stream.never).pipe(
+        Effect.forkScoped,
+      )
+
+      rmSync(transportEndpoint)
+
       expect(
-        (
-          yield* claimSessionDaemon({
-            authorityEndpoint,
-            transportEndpoint,
-          })
-        )._tag,
-      ).toBe("AlreadyRunning")
+        (yield* claimSessionDaemonEndpoint(transportEndpoint))._tag,
+      ).toBe("Owned")
+      const competingStorage = yield* Effect.promise(() =>
+        Effect.runPromiseExit(
+          Effect.scoped(
+            Layer.build(
+              Layer.fresh(sqliteSessionStorageLayer(storagePath)),
+            ),
+          ),
+        ),
+      )
+      expect(Exit.isFailure(competingStorage)).toBe(true)
     }).pipe(Effect.provide(NodeServices.layer)),
 )
 
