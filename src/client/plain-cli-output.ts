@@ -135,6 +135,6 @@ export const writeCliFailure = (lineSeparator: string) =>
   Effect.gen(function* () {
     const stdio = yield* Stdio.Stdio
     yield* Stream.make(
-      `PackWalk could not connect to its local session service. No Codex session was changed.${lineSeparator}`,
+      `PackWalk could not complete its local session command. No Codex session was changed.${lineSeparator}`,
     ).pipe(Stream.run(stdio.stderr({ endOnDone: false })))
   })

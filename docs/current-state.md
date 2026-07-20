@@ -133,6 +133,10 @@ commands now use `npm run --silent packwalk -- ...`, and an isolated
 process-level regression executes those exact commands through real local IPC
 to protect clean text, parseable JSON, and invalid-usage streams. The blocker is
 fixed pending full verification, fresh generic review, and fresh preflight.
+Generic review pass 3 confirmed zero Specification findings and required a
+truthful generic catch-all error plus bounded process-tree cleanup in the new
+regression. Both corrections are implemented with platform-specific termination
+and explicit command/test timeouts, pending full verification and fresh review.
 
 ## Reproduce
 

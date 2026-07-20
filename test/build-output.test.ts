@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import {
   existsSync,
   mkdirSync,
@@ -18,6 +18,8 @@ import { expect, it } from "vitest"
 import { deriveRuntimePaths } from "../src/adapters/runtime-paths.js"
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
+const commandTimeoutMs = 30_000
+const forceKillDelayMs = 2_000
 
 interface ProcessResult {
   readonly exitCode: number | null
@@ -25,9 +27,35 @@ interface ProcessResult {
   readonly stderr: string
 }
 
+const terminateProcessTree = (
+  child: ChildProcess,
+  signal: "SIGTERM" | "SIGKILL",
+): void => {
+  const pid = child.pid
+  if (pid === undefined) return
+
+  if (process.platform === "win32") {
+    const killer = spawn(
+      "taskkill",
+      ["/pid", String(pid), "/T", "/F"],
+      { stdio: "ignore", windowsHide: true },
+    )
+    killer.once("error", () => undefined)
+    killer.unref()
+    return
+  }
+
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    child.kill(signal)
+  }
+}
+
 const runDocumentedPackWalk = (
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv,
+  activeChildren: Set<ChildProcess>,
 ): Promise<ProcessResult> =>
   new Promise((resolve, reject) => {
     const child = spawn(
@@ -35,12 +63,33 @@ const runDocumentedPackWalk = (
       ["run", "--silent", "packwalk", "--", ...args],
       {
         cwd: repositoryRoot,
+        detached: process.platform !== "win32",
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
       },
     )
+    activeChildren.add(child)
     let stdout = ""
     let stderr = ""
+    let settled = false
+    let timedOut = false
+    let forceKillTimer: NodeJS.Timeout | undefined
+    const commandTimer = setTimeout(() => {
+      timedOut = true
+      terminateProcessTree(child, "SIGTERM")
+      forceKillTimer = setTimeout(
+        () => terminateProcessTree(child, "SIGKILL"),
+        forceKillDelayMs,
+      )
+    }, commandTimeoutMs)
+    const finish = (): boolean => {
+      if (settled) return false
+      settled = true
+      clearTimeout(commandTimer)
+      if (forceKillTimer !== undefined) clearTimeout(forceKillTimer)
+      activeChildren.delete(child)
+      return true
+    }
     child.stdout.setEncoding("utf8")
     child.stderr.setEncoding("utf8")
     child.stdout.on("data", (chunk: string) => {
@@ -49,10 +98,21 @@ const runDocumentedPackWalk = (
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk
     })
-    child.once("error", reject)
-    child.once("close", (exitCode) =>
-      resolve({ exitCode, stdout, stderr }),
-    )
+    child.once("error", (error) => {
+      if (finish()) reject(error)
+    })
+    child.once("close", (exitCode) => {
+      if (!finish()) return
+      if (timedOut) {
+        reject(
+          new Error(
+            `Documented PackWalk command exceeded ${commandTimeoutMs}ms`,
+          ),
+        )
+        return
+      }
+      resolve({ exitCode, stdout, stderr })
+    })
   })
 
 const closeServer = async (
@@ -68,7 +128,9 @@ const closeServer = async (
   await closed
 }
 
-it("builds clean output and keeps documented one-shot stdout machine-clean", async () => {
+it("builds clean output and keeps documented one-shot stdout machine-clean", {
+  timeout: 120_000,
+}, async () => {
   if (
     process.platform !== "darwin" &&
     process.platform !== "linux" &&
@@ -138,6 +200,7 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", asy
     },
   }
   const sockets = new Set<Socket>()
+  const activeChildren = new Set<ChildProcess>()
   let connectionCount = 0
   const server = createServer((socket) => {
     sockets.add(socket)
@@ -173,9 +236,21 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", asy
     server.listen(runtimePaths.ipcEndpoint)
     await listening
 
-    const text = await runDocumentedPackWalk(["text"], environment)
-    const json = await runDocumentedPackWalk(["json"], environment)
-    const invalid = await runDocumentedPackWalk(["--json"], environment)
+    const text = await runDocumentedPackWalk(
+      ["text"],
+      environment,
+      activeChildren,
+    )
+    const json = await runDocumentedPackWalk(
+      ["json"],
+      environment,
+      activeChildren,
+    )
+    const invalid = await runDocumentedPackWalk(
+      ["--json"],
+      environment,
+      activeChildren,
+    )
 
     expect(existsSync(staleArtifact)).toBe(false)
     expect(existsSync(staleDirectory)).toBe(false)
@@ -197,6 +272,9 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", asy
     expect(invalid.stderr).toBe(`Usage: packwalk [text|json]${EOL}`)
     expect(connectionCount).toBe(2)
   } finally {
+    for (const child of activeChildren) {
+      terminateProcessTree(child, "SIGKILL")
+    }
     await closeServer(server, sockets)
     rmSync(testRoot, { recursive: true, force: true })
   }

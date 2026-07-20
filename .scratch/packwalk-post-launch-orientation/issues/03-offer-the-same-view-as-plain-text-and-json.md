@@ -66,3 +66,12 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   empty stderr, exit 0, and fixed invalid-usage stdout/stderr/exit behavior.
   The focused regression is green; full verification, fresh generic review,
   and a fresh product preflight remain required.
+- 2026-07-20: Generic review pass 3 remained clean on Specification and found
+  two Standards issues. The catch-all failure now truthfully says only that the
+  local session command could not complete instead of mislabelling encoding,
+  empty-stream, or output errors as connection failures. The process-level
+  regression now gives each documented command a 30-second bound, terminates
+  its isolated process tree on timeout on POSIX and Windows, tracks active
+  children for final cleanup, and has an explicit 120-second test budget for
+  three builds. Focused tests, typecheck, and lint are green; full verification
+  and a fresh review remain required.

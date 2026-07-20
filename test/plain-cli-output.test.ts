@@ -112,7 +112,7 @@ it.effect("writes a redacted failure with the selected platform separator", () =
     )
 
     expect(yield* Ref.get(stderr)).toBe(
-      "PackWalk could not connect to its local session service. No Codex session was changed.\r\n",
+      "PackWalk could not complete its local session command. No Codex session was changed.\r\n",
     )
   }),
 )
