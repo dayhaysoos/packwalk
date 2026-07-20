@@ -328,9 +328,24 @@ session/storage acquisition. Both real macOS spellings now derive
 and build; and the persisted-Codex check passes in 4.12 seconds. Compiled JSON
 and text each returned all 19 unique exact identities with zero exits and empty
 stderr. The endpoint-owning v2 PID 27668 was stopped and the pre-existing v1
-PID 77857 remains untouched. Final targeted authority review reports zero
-actionable findings. Ticket 04 remains claimed for another wholly fresh generic
-review; product preflight remains paused until that review is clean.
+  PID 77857 remains untouched. Final targeted authority review reports zero
+actionable findings. Fresh generic review pass 6 then reports zero actionable
+Specification findings and one P1 Standards blocker in the actual launcher
+order: after the captured data directory is replaced with a symlink,
+`prepareRuntimeDirectories` follows it and chmods the unrelated target before
+authority verification fails. That P1 is now repaired with the exact red
+launcher-sequence regression. Runtime-path resolution exclusively creates,
+secures, and captures the database directory; later preparation owns only the
+independent Unix endpoint directory. A swapped data-directory symlink and its
+unrelated mode-0755 target remain unchanged before capture-only verification
+rejects the launch. Focused runtime/build verification passes 24 tests;
+`npm run verify` passes 21 files and 109 tests plus typecheck, lint, and build;
+and the persisted-Codex check passes in 4.13 seconds. Rebuilt public JSON and
+text clients each exited zero with empty stderr and returned all 19 unique exact
+identities; JSON was a protocol-v2 `SessionsSnapshot`. The positively
+identified endpoint-owning v2 PID 32103 was stopped, while pre-existing v1 PID
+77857 remains running and untouched. Ticket 04 remains claimed for an entirely
+fresh generic review; product preflight remains paused.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 

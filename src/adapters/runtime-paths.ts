@@ -22,7 +22,6 @@ import {
   Config,
   Context,
   Effect,
-  FileSystem,
   Layer,
   Option,
   Schema,
@@ -477,16 +476,9 @@ const securePrivateUnixDirectory = (
 
 export const prepareRuntimeDirectories = Effect.gen(function* () {
   const paths = yield* RuntimePaths
-  const fileSystem = yield* FileSystem.FileSystem
-
-  yield* fileSystem.makeDirectory(paths.packWalkDataDirectory, {
-    recursive: true,
-    mode: 0o700,
-  })
 
   const ipcDirectory = paths.ipcDirectory
   if (ipcDirectory !== undefined) {
-    yield* fileSystem.chmod(paths.packWalkDataDirectory, 0o700)
     yield* Effect.try({
       try: () => {
         if (process.getuid === undefined) {

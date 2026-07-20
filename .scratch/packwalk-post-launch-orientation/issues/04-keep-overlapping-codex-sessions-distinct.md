@@ -217,3 +217,29 @@ sessions overlap, share a repository, or have duplicate display labels.
   reports zero actionable findings. Ticket 04 remains claimed for a wholly
   fresh generic review and independent product preflight; no maintainer
   acceptance is claimed.
+- 2026-07-20: Fresh generic review pass 6 reports zero actionable
+  Specification findings and one P1 Standards blocker in the real launcher
+  order. If the captured PackWalk data directory is replaced with a symlink,
+  `prepareRuntimeDirectories` follows it and chmods the unrelated owned target
+  before `verifyRuntimeAuthority` rejects the changed identity. Ticket 04
+  remains claimed while a red regression covers the exact prepare-then-verify
+  sequence and preparation stops mutating the already-secured database
+  authority. Full verification and an entirely fresh generic review follow;
+  product preflight remains paused.
+- 2026-07-20: Pass 6's preparation-time P1 is repaired with the exact red
+  launcher-sequence regression. Runtime-path resolution alone creates,
+  secures, and captures the PackWalk database directory; later preparation no
+  longer creates or chmods that authority and owns only the independent Unix
+  endpoint directory. A swapped data-directory symlink now remains a symlink,
+  its unrelated mode-0755 target remains unchanged, and the capture-only
+  verification rejects the launch. Focused runtime/build verification passes
+  24 tests. Full verification and an entirely fresh generic review remain
+  pending; product preflight stays paused.
+- 2026-07-20: Full post-repair verification is green: `npm run verify` passes
+  21 files and 109 tests plus typecheck, lint, and build; the opt-in persisted
+  Codex check passes in 4.13 seconds. The rebuilt public JSON and text clients
+  each exit zero with empty stderr, return all 19 unique exact identities, and
+  JSON is a protocol-v2 `SessionsSnapshot`. The positively identified
+  endpoint-owning v2 PID 32103 was stopped after the exercise; pre-existing v1
+  PID 77857 remains running and untouched. Ticket 04 remains claimed for a
+  wholly fresh generic review; product preflight remains paused.

@@ -490,6 +490,57 @@ describe("PackWalk runtime paths", () => {
   )
 
   it.effect.skipIf(process.platform === "win32")(
+    "rejects a replaced data directory before preparation mutates its target",
+    () => {
+      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-prepare-swap-test-"))
+      const dataRoot = join(testRoot, "data")
+      const unrelatedDirectory = join(testRoot, "unrelated")
+      mkdirSync(dataRoot)
+      mkdirSync(unrelatedDirectory, { mode: 0o755 })
+      chmodSync(unrelatedDirectory, 0o755)
+      const paths = deriveRuntimePaths(
+        {
+          platform: "linux",
+          homeDirectory: "/home/example",
+          xdgDataHome: dataRoot,
+        },
+        identifyNativeDurablePath,
+      )
+      renameSync(
+        paths.packWalkDataDirectory,
+        join(testRoot, "previous-packwalk"),
+      )
+      symlinkSync(
+        unrelatedDirectory,
+        paths.packWalkDataDirectory,
+        "dir",
+      )
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+        )
+        const launch = yield* Effect.result(
+          Effect.gen(function* () {
+            yield* prepareRuntimeDirectories
+            yield* verifyRuntimeAuthority(paths)
+          }),
+        )
+
+        expect(Result.isFailure(launch)).toBe(true)
+        expect(lstatSync(paths.packWalkDataDirectory).isSymbolicLink()).toBe(
+          true,
+        )
+        expect(statSync(unrelatedDirectory).mode & 0o777).toBe(0o755)
+      }).pipe(
+        Effect.provide(Layer.succeed(RuntimePaths, RuntimePaths.of(paths))),
+        Effect.provide(NodeServices.layer),
+        Effect.scoped,
+      )
+    },
+  )
+
+  it.effect.skipIf(process.platform === "win32")(
     "rejects a symlinked Unix endpoint directory without changing its target",
     () => {
       const testRoot = mkdtempSync(join(tmpdir(), "packwalk-ipc-symlink-test-"))
@@ -538,13 +589,13 @@ describe("PackWalk runtime paths", () => {
   )
 
   it.effect.skipIf(process.platform === "win32")(
-    "creates and re-secures an owned Unix endpoint directory with private permissions",
+    "creates and re-secures an owned Unix endpoint after data authority is prepared",
     () => {
       const testRoot = mkdtempSync(join(tmpdir(), "packwalk-ipc-private-test-"))
       const dataDirectory = join(testRoot, "data")
       const ipcDirectory = join(testRoot, "predictable-ipc-leaf")
-      mkdirSync(dataDirectory, { mode: 0o777 })
-      chmodSync(dataDirectory, 0o777)
+      mkdirSync(dataDirectory, { mode: 0o700 })
+      chmodSync(dataDirectory, 0o700)
       const runtimePaths = RuntimePaths.of({
         codexDatabasePath: join(testRoot, "codex.sqlite"),
         packWalkDataDirectory: dataDirectory,
