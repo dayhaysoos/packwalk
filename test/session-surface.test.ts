@@ -1014,6 +1014,124 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
   }),
 )
 
+it.effect("retains regressed discovery across restart and CLI reconnect", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const packWalk = yield* makeRestartableDeterministicPackWalk({
+      version: 1,
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 1_000,
+    })
+
+    const firstScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    yield* packWalk.startDaemonIn(firstScope)
+    const firstObserved = yield* Deferred.make<void>()
+    const firstRun = yield* packWalk.events.pipe(
+      Stream.tap(() => Deferred.succeed(firstObserved, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+    yield* Deferred.await(firstObserved)
+    yield* TestClock.adjust("1 second")
+    yield* Fiber.join(firstRun)
+    yield* Scope.close(firstScope, Exit.void)
+
+    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 500 })
+    const secondScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
+    yield* packWalk.startDaemonIn(secondScope)
+
+    const renderedFrames = yield* Ref.make<
+      ReadonlyArray<ReadonlyArray<string>>
+    >([])
+    const client: ClientPort = {
+      writeFrame: (lines) =>
+        Ref.update(renderedFrames, (frames) => [...frames, lines]),
+    }
+    const restartedEvents = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    yield* runSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(restartedEvents, (events) => [...events, event]),
+        ),
+        Stream.take(1),
+      ),
+      client,
+    )
+    expect(yield* Ref.get(restartedEvents)).toEqual([{
+      _tag: "SessionsSnapshot",
+      protocolVersion: 3,
+      views: [{
+        protocolVersion: 2,
+        sessionId,
+        projectIdentity: "fixture-project",
+        activity: "persisted Codex activity",
+        evidenceSource: "codex-sqlite-thread-index",
+        state: { _tag: "Polled" },
+        freshness: "stale",
+        provenance: {
+          _tag: "Retained",
+          reason: "source-unsupported",
+        },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 3_000,
+        commitSequence: 3,
+      }],
+    }])
+
+    const reconnectEvents = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    yield* runSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(reconnectEvents, (events) => [...events, event]),
+        ),
+        Stream.take(1),
+      ),
+      client,
+    )
+    expect(yield* Ref.get(reconnectEvents)).toEqual(
+      yield* Ref.get(restartedEvents),
+    )
+
+    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 1_000 })
+    const recoveredEvents = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    yield* runSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(recoveredEvents, (events) => [...events, event]),
+        ),
+        Stream.take(1),
+      ),
+      client,
+    )
+    expect(yield* Ref.get(recoveredEvents)).toEqual([
+      expect.objectContaining({
+        _tag: "SessionsSnapshot",
+        views: [expect.objectContaining({
+          sessionId,
+          freshness: "fresh",
+          provenance: { _tag: "Observed" },
+          sourceUpdatedAtMs: 1_000,
+          observedAtMs: 3_000,
+          commitSequence: 4,
+        })],
+      }),
+    ])
+
+    const frames = yield* Ref.get(renderedFrames)
+    expect(frames).toHaveLength(3)
+    expect(frames[0]).toEqual(frames[1])
+    expect(frames[0]?.join("\n")).toContain(
+      "RETAINED (source-unsupported)",
+    )
+    expect(frames[2]?.join("\n")).toContain("OBSERVED")
+    yield* Scope.close(secondScope, Exit.void)
+  }),
+)
+
 it.effect("degrades only the exact unavailable session in a complete overview", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)

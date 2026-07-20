@@ -24,9 +24,7 @@ import {
   degradeSession,
   encodeSessionProtocolEvent,
   matchTransition,
-  matchSessionTransitionTrigger,
   sameSessionIdentity,
-  type IllegalSessionTransition,
   SessionProtocolEvent,
   SessionTransitionTrigger,
   type CodexPersistedFact,
@@ -39,7 +37,7 @@ import {
 export interface Interface {
   readonly events: Stream.Stream<SessionProtocolEvent>
   readonly refresh: () => Effect.Effect<void>
-  readonly runPolling: Effect.Effect<never, IllegalSessionTransition>
+  readonly runPolling: Effect.Effect<never>
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -286,40 +284,40 @@ const validateFacts = (
     return [orderedFirst, ...ordered.slice(1)]
   })
 
-const reduceObservation = Effect.fn("SessionSurface.reduceObservation")(
+const reduceDiscovery = Effect.fn("SessionSurface.reduceDiscovery")(
   function* (
     current: SessionStorageSnapshot,
     sourceFacts: ReadonlyArray<CodexPersistedFact>,
     observedAtMs: number,
-    trigger: SessionTransitionTrigger,
   ) {
     const facts = yield* validateFacts(sourceFacts)
     const accumulator = makeObservationAccumulator(current)
 
-    for (const [factIndex, fact] of facts.entries()) {
-      const currentView = matchSessionTransitionTrigger(trigger, {
-        Discovery: () => accumulator.nextByIdentity.get(fact.sessionId),
-        Polling: () => current.views[factIndex],
-      })
-      const requiresExistingIdentity = matchSessionTransitionTrigger(trigger, {
-        Discovery: () => false,
-        Polling: () => true,
-      })
-      if (requiresExistingIdentity && currentView === undefined) {
-        return yield* new SessionSourceError({
-          code: "invalid-evidence",
-          message: "Codex persisted evidence is incompatible",
-        })
-      }
+    for (const fact of facts) {
+      const currentView = accumulator.nextByIdentity.get(fact.sessionId)
       const decision = transitionSession(
         currentView === undefined ? Option.none() : Option.some(currentView),
         fact,
         observedAtMs,
-        trigger,
+        SessionTransitionTrigger.Discovery(),
         accumulator.lastCommitSequence + 1,
       )
       if (Result.isFailure(decision)) {
-        return yield* decision.failure
+        if (currentView === undefined) {
+          return yield* new SessionSourceError({
+            code: "invalid-evidence",
+            message: "Codex persisted evidence is incompatible",
+          })
+        }
+        recordSessionTransition(
+          accumulator,
+          degradeSession(
+            currentView,
+            "source-unsupported",
+            accumulator.lastCommitSequence + 1,
+          ),
+        )
+        continue
       }
 
       recordSessionTransition(accumulator, decision.success)
@@ -484,11 +482,10 @@ export const layer = Layer.effect(
       }
 
       const observedAtMs = yield* Clock.currentTimeMillis
-      return yield* reduceObservation(
+      return yield* reduceDiscovery(
         current,
         discovered.success,
         observedAtMs,
-        trigger,
       )
     })
 

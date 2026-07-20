@@ -10,9 +10,8 @@ import {
   layer as sessionSurfaceLayer,
   Service as SessionSurface,
 } from "../application/session-surface.js"
-import type { IllegalSessionTransition } from "../domain/session.js"
 
-export type SessionDaemonFailure = LocalIpcError | IllegalSessionTransition
+export type SessionDaemonFailure = LocalIpcError
 
 export interface Interface {
   readonly lifetime: Effect.Effect<never, SessionDaemonFailure>

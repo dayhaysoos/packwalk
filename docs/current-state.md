@@ -620,9 +620,10 @@ maintainer acceptance is claimed.
 
 [Ticket 05](../.scratch/packwalk-post-launch-orientation/issues/05-restore-and-degrade-the-overview-safely.md)
 is claimed on `agent/ticket-05-safe-restoration` from fixed integration point
-`ef6ed5074b6a039ae7ced76e50508405c82f338e`. The first fresh generic review
-reported three Standards findings and two Specification findings. All five are
-fixed, full verification is green, and a wholly fresh generic review plus
+`ef6ed5074b6a039ae7ced76e50508405c82f338e`. The first fresh generic review's
+three Standards findings and two Specification findings are fixed. The second
+fresh review's three Standards smells and one Specification blocker are also
+fixed. Full verification is green; a third wholly fresh generic review plus
 independent product preflight remain pending.
 
 `SessionView` v2 now makes freshness and provenance an explicit closed pair:
@@ -632,6 +633,9 @@ Exact polling failures, crossed identities, ambiguous evidence, and regressed
 source time never merge rejected payloads or drop a known row. A failed
 overview discovery with known rows visibly retains those rows as
 `source-unsupported` rather than masking the failure behind exact polling.
+Regressed exact evidence discovered during daemon startup likewise commits and
+renders the last supported row as retained across reconnect rather than
+collapsing the overview to an unavailable placeholder.
 Degradation preserves project, activity, evidence source, lifecycle state,
 source time, and the last successful observation time; it commits once. The
 same valid source fact recovers as one new observed commit even when its source
@@ -658,7 +662,7 @@ reconnects to one current snapshot without replay. A
 two-session public test proves only the unavailable exact identity changes.
 Injected Windows, macOS, and Linux application-data/endpoint laws remain
 explicit; real transport execution is host-native and native three-platform
-qualification remains Ticket 10. The deterministic suite passes 22 files, 154
+qualification remains Ticket 10. The deterministic suite passes 22 files, 155
 tests, and one intentional host-policy skip; typecheck, lint, build, and diff
 checks pass. The opt-in installed-Codex test passes against this machine's real
 persisted source without starting, resuming, or changing a Codex session.

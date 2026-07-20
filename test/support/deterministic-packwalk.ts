@@ -43,9 +43,8 @@ interface PersistSourceUpdate {
   ): Effect.Effect<void, SessionSourceError>
 }
 
-export interface DeterministicPackWalk {
+interface DeterministicPackWalkControls {
   readonly events: Stream.Stream<SessionEvent, LocalIpcError>
-  readonly lifetime: Effect.Effect<never, SessionDaemonFailure>
   readonly persistSourceUpdate: PersistSourceUpdate
   readonly persistSourceIdentityForTest: (
     sessionId: string,
@@ -65,28 +64,15 @@ export interface DeterministicPackWalk {
   ) => Effect.Effect<void>
 }
 
-export interface RestartableDeterministicPackWalk {
-  readonly events: Stream.Stream<SessionEvent, LocalIpcError>
+export interface DeterministicPackWalk extends DeterministicPackWalkControls {
+  readonly lifetime: Effect.Effect<never, SessionDaemonFailure>
+}
+
+export interface RestartableDeterministicPackWalk
+  extends DeterministicPackWalkControls {
   readonly startDaemonIn: (
     scope: Scope.Scope,
   ) => Effect.Effect<Effect.Effect<never, SessionDaemonFailure>, unknown>
-  readonly persistSourceUpdate: PersistSourceUpdate
-  readonly persistSourceIdentityForTest: (
-    sessionId: string,
-  ) => Effect.Effect<void, SessionSourceError>
-  readonly persistSourceFactForTest: (
-    fact: unknown,
-  ) => Effect.Effect<void>
-  readonly loseSourceForTest: Effect.Effect<void>
-  readonly restoreSourceForTest: Effect.Effect<void>
-  readonly rejectDiscoveryForTest: Effect.Effect<void>
-  readonly acceptDiscoveryForTest: Effect.Effect<void>
-  readonly loseExactSourceForTest: (
-    sessionId: string,
-  ) => Effect.Effect<void, SessionSourceError>
-  readonly restoreExactSourceForTest: (
-    sessionId: string,
-  ) => Effect.Effect<void>
 }
 
 export interface DeterministicPackWalkOptions {
