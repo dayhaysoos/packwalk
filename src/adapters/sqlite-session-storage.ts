@@ -26,6 +26,7 @@ import {
   CodexPersistedFact,
   DateTimestampMs,
   Identity,
+  MaximumSessionHistoryPageFacts,
   ProjectIdentity,
   sameSessionView,
   SessionEvidenceFact,
@@ -45,8 +46,6 @@ import {
 } from "./project-identity.js"
 
 const MaximumSafeInteger = Number.MAX_SAFE_INTEGER
-const HistoryPageSize = 32
-
 const NonNegativeSafeInteger = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(0),
   Schema.isLessThanOrEqualTo(MaximumSafeInteger),
@@ -1698,8 +1697,26 @@ export const layer = (path: string, legacyPath?: string) =>
                     exactSessionKey,
                     afterCommitSequence,
                     throughCommitSequence,
-                    HistoryPageSize + 1,
+                    MaximumSessionHistoryPageFacts + 1,
                   )
+                const cursorAnchor = decodedCursor === null
+                  ? undefined
+                  : database
+                      .prepare(`
+                        SELECT commit_sequence
+                        FROM session_evidence_history
+                        WHERE
+                          session_id = ? COLLATE BINARY AND
+                          commit_sequence = ?
+                      `)
+                      .get(exactSessionKey, afterCommitSequence)
+                if (
+                  decodedCursor !== null &&
+                  (explainedRow === undefined || cursorAnchor === undefined)
+                ) {
+                  database.exec("COMMIT")
+                  return { _tag: "NotFound" as const }
+                }
                 const baseline = database
                   .prepare(`
                     SELECT COUNT(*) AS baseline_count
@@ -1771,7 +1788,7 @@ export const layer = (path: string, legacyPath?: string) =>
             }
           }
 
-          const pageRows = result.rows.slice(0, HistoryPageSize)
+          const pageRows = result.rows.slice(0, MaximumSessionHistoryPageFacts)
           const decodedFacts = yield* Effect.forEach(pageRows, (row) =>
             decodeHistoryRow(row).pipe(
               Effect.mapError(() =>
@@ -1784,7 +1801,8 @@ export const layer = (path: string, legacyPath?: string) =>
           if (firstFact === undefined || lastFact === undefined) {
             return yield* storageError("SessionStorage.loadHistoryPage")
           }
-          const hasNextPage = result.rows.length > HistoryPageSize
+          const hasNextPage =
+            result.rows.length > MaximumSessionHistoryPageFacts
           if (
             !hasNextPage &&
             lastFact.view.commitSequence !== throughCommitSequence

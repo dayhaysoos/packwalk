@@ -55,7 +55,7 @@ explains each session status without becoming a second transcript archive.
   laws, and compiled text/JSON commands over real local IPC. The opt-in test
   also crossed an installed Codex persisted update through storage, daemon
   publication, IPC, and public history inspection without changing Codex.
-  `npm run verify` passes 26 files, 174 tests, and one intentional host-policy
+  `npm run verify` passes 26 files, 176 tests, and one intentional host-policy
   skip plus typecheck, lint, and the production build.
 - 2026-07-20: A cold real-product command exposed that the former five-second
   client reconnect budget could expire while the new v4 daemon completed its
@@ -84,6 +84,17 @@ explains each session status without becoming a second transcript archive.
   start, retry delays, and connection attempts in one explicit elapsed
   deadline; both CLI paths supply thirty seconds. The focused deadline suite
   passes three tests, and `npm run verify` passes 26 files, 173 tests, and one
+  intentional skip plus typecheck, lint, and build. Another wholly fresh
+  generic review remains.
+- 2026-07-20: Fresh generic review pass 4 is clean on Specification and found
+  two Standards gaps. A 33-fact protocol page passed the decoder because the
+  fixed page size existed only in SQLite, and a well-formed continuation whose
+  exact-session ceiling did not exist surfaced as generic history failure. Both
+  regressions first failed. One exported 32-fact constant now owns schema and
+  SQL page bounds, and storage recognizes missing exact-session continuation
+  ceilings or anchors as invalid cursors while preserving genuine corruption
+  as storage failure. The focused four-file contract/public/storage suite
+  passes 28 tests, and `npm run verify` passes 26 files, 176 tests, and one
   intentional skip plus typecheck, lint, and build. Another wholly fresh
   generic review remains.
 - 2026-07-20: Fresh generic review pass 3 is clean on Specification and found

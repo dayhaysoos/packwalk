@@ -46,6 +46,7 @@ interface PersistSourceUpdate {
 }
 
 interface DeterministicPackWalkControls {
+  readonly endpointForTest: string
   readonly events: Stream.Stream<SessionEvent, LocalIpcError>
   readonly inspectHistory: (
     sessionId: string,
@@ -328,6 +329,7 @@ export const makeRestartableDeterministicPackWalk = (
         return next
       })
     return {
+      endpointForTest: endpoint,
       events: Stream.unwrap(connectSessionEvents(endpoint)),
       inspectHistory: (exactSessionId) =>
         inspectSessionHistory(endpoint, SessionIdentity.make(exactSessionId)),

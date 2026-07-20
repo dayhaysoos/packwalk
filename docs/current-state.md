@@ -716,7 +716,7 @@ repeat inspection, prohibited content, and injected Windows/macOS/Linux
 encoding and path behavior. Compiled text and JSON inspection crossed real
 local IPC, and the opt-in installed-Codex check crossed a real persisted update
 through storage, publication, IPC, and public history inspection without
-changing Codex. `npm run verify` passes 26 files, 174 tests, and one intentional
+changing Codex. `npm run verify` passes 26 files, 176 tests, and one intentional
 host-policy skip plus typecheck, lint, and the production build.
 
 A cold real-product run also exposed that the former five-second reconnect
@@ -754,6 +754,18 @@ commands both supply thirty seconds. The focused deadline suite passes three
 tests, and full verification passes 26 files, 173 tests, and one intentional
 skip plus typecheck, lint, and build. Another wholly fresh generic review
 remains.
+
+Fresh generic review pass 4 reports zero Specification findings and two
+Standards gaps. A 33-fact protocol page passed the decoder because the fixed
+page size existed only in SQLite, and a well-formed continuation whose
+exact-session ceiling did not exist surfaced as generic history failure. Both
+regressions first failed. One exported 32-fact constant now owns schema and SQL
+page bounds. Storage maps missing exact-session continuation ceilings or
+anchors to the public `invalid-history-cursor` result while preserving genuine
+database or row corruption as `history-unavailable`. The focused four-file
+contract/public/storage suite passes 28 tests, and full verification passes 26
+files, 176 tests, and one intentional skip plus typecheck, lint, and build.
+Another wholly fresh generic review remains.
 
 Fresh generic review pass 3 reports zero Specification findings and one
 Standards blocker: an accepting endpoint could complete overview connection

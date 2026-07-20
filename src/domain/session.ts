@@ -415,8 +415,21 @@ export const SessionHistory = Schema.TaggedStruct(
 
 export type SessionHistory = typeof SessionHistory.Type
 
+export const MaximumSessionHistoryPageFacts = 32
+
+const SessionHistoryPageFacts = Schema.NonEmptyArray(
+  SessionEvidenceFact,
+).check(
+  Schema.makeFilter((facts) =>
+    facts.length <= MaximumSessionHistoryPageFacts
+      ? undefined
+      : "session history page exceeds its fact limit",
+  ),
+)
+
 const SessionHistoryPageFields = {
   ...SessionHistoryFields,
+  facts: SessionHistoryPageFacts,
   afterCommitSequence: NonNegativeSafeInteger,
   throughCommitSequence: PositiveSafeInteger,
   nextAfterCommitSequence: Schema.NullOr(PositiveSafeInteger),

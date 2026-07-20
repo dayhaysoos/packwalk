@@ -1,7 +1,11 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 
-import { SessionHistory } from "../src/domain/session.js"
+import {
+  MaximumSessionHistoryPageFacts,
+  SessionHistory,
+  SessionHistoryPage,
+} from "../src/domain/session.js"
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
 
@@ -51,6 +55,9 @@ const history = {
 } as const
 
 const decodeHistory = Schema.decodeUnknownEffect(SessionHistory, {
+  onExcessProperty: "error",
+})
+const decodeHistoryPage = Schema.decodeUnknownEffect(SessionHistoryPage, {
   onExcessProperty: "error",
 })
 
@@ -169,5 +176,30 @@ it.effect("keeps migration coverage and recorded timestamps explicit", () =>
     ]) {
       expect(Result.isFailure(yield* decodeHistory(invalid).pipe(Effect.result))).toBe(true)
     }
+  }),
+)
+
+it.effect("rejects a protocol page exceeding the shared fact limit", () =>
+  Effect.gen(function* () {
+    const facts = Array.from(
+      { length: MaximumSessionHistoryPageFacts + 1 },
+      (_, index) => ({
+      factVersion: 1,
+      origin: { _tag: "Committed", recordedAtMs: 4_000 - index },
+      view: view(index + 1, 3_000 - index),
+      }),
+    )
+    const finalSequence = MaximumSessionHistoryPageFacts + 1
+    const result = yield* decodeHistoryPage({
+      ...history,
+      _tag: "SessionHistoryPage",
+      explainedView: view(finalSequence, 3_000 - MaximumSessionHistoryPageFacts),
+      facts,
+      afterCommitSequence: 0,
+      throughCommitSequence: finalSequence,
+      nextAfterCommitSequence: null,
+    }).pipe(Effect.result)
+
+    expect(Result.isFailure(result)).toBe(true)
   }),
 )

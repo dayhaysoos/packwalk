@@ -1,3 +1,5 @@
+import { createConnection } from "node:net"
+
 import { expect, it } from "@effect/vitest"
 import { Effect, Exit, Option, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -8,6 +10,52 @@ import {
 } from "./support/deterministic-packwalk.js"
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
+
+const queryHistoryPage = (
+  endpoint: string,
+  command: unknown,
+): Effect.Effect<unknown, Error> =>
+  Effect.tryPromise({
+    try: () =>
+      new Promise<unknown>((resolve, reject) => {
+        const socket = createConnection(endpoint)
+        let buffered = ""
+        let completed = false
+        let timer: ReturnType<typeof setTimeout>
+        const finish = (complete: () => void): void => {
+          if (completed) return
+          completed = true
+          clearTimeout(timer)
+          socket.destroy()
+          complete()
+        }
+        timer = setTimeout(
+          () => finish(() => reject(new Error("History page response timed out"))),
+          2_000,
+        )
+        socket.setEncoding("utf8")
+        socket.once("error", (error) => finish(() => reject(error)))
+        socket.once("connect", () => {
+          socket.write(`${JSON.stringify(command)}\n`)
+        })
+        socket.on("data", (chunk: string) => {
+          buffered += chunk
+          const lineEnd = buffered.indexOf("\n")
+          if (lineEnd < 0) return
+          const line = buffered.slice(0, lineEnd)
+          try {
+            const decoded: unknown = JSON.parse(line)
+            finish(() => resolve(decoded))
+          } catch (error) {
+            finish(() =>
+              reject(error instanceof Error ? error : new Error("Invalid JSON")),
+            )
+          }
+        })
+      }),
+    catch: (error) =>
+      error instanceof Error ? error : new Error("History page query failed"),
+  })
 
 it.effect("inspects one committed content-free fact through the public daemon seam", () =>
   Effect.gen(function* () {
@@ -72,6 +120,36 @@ it.effect("inspects one committed content-free fact through the public daemon se
       ],
     })
     expect(second).toEqual(first)
+  }),
+)
+
+it.effect("reports a nonexistent exact-session continuation as an invalid cursor", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const packWalk = yield* makeDeterministicPackWalk({
+      version: 1,
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 1_000,
+    })
+
+    const result = yield* queryHistoryPage(packWalk.endpointForTest, {
+      _tag: "InspectSessionHistory",
+      protocolVersion: 4,
+      sessionId,
+      cursor: {
+        afterCommitSequence: 1,
+        throughCommitSequence: 999,
+      },
+    })
+
+    expect(result).toMatchObject({
+      _tag: "SessionHistoryUnavailable",
+      protocolVersion: 4,
+      sessionId,
+      code: "invalid-history-cursor",
+      message: "PackWalk could not continue that retained session history query",
+    })
   }),
 )
 
