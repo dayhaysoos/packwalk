@@ -84,7 +84,8 @@ reopen Ticket 01 polling.
 
 The accepted Ticket 01 slice is published on `main` at
 `e7c7808f4b0ba1b90803634a7f8613beffb96383`, and
-`integration/full-local-product` starts from that same commit.
+`integration/full-local-product` has advanced through resolved Ticket 03 at
+`31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8`.
 
 [Ticket 02](../.scratch/packwalk-post-launch-orientation/issues/02-attempt-one-post-launch-live-codex-event.md)
 is `needs-info` on `agent/ticket-02-live-event-experiment`. Static inspection
@@ -111,8 +112,8 @@ remaining evidence is the maintainer-started default-TUI snapshot documented in
 the ticket. No production code or `watched` state was added.
 
 [Ticket 03](../.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
-is resolved on `agent/ticket-03-text-json-output` from integration fixed point
-`6c4686dca30466b52db56785ef159348a28a4d1e` and is ready to integrate.
+is resolved and integrated from `agent/ticket-03-text-json-output`. Its fixed
+integration point was `6c4686dca30466b52db56785ef159348a28a4d1e`.
 `packwalk text` and `packwalk json` consume exactly the same initial public
 daemon event as the refreshing CLI, emit one
 platform-native-line-ended document, and exit without affecting the daemon.
@@ -197,10 +198,20 @@ Fresh generic review pass 10 is clean with zero actionable Standards and zero
 Ticket 03 Specification findings through
 `3992844c15bc0838381991ab55278f0166662059`. Fresh independent product
 preflight on that exact commit again reports `READY FOR MAINTAINER` after
-reproducing the public quiet commands. Ticket 03 is resolved for integration.
+reproducing the public quiet commands. Ticket 03 is resolved and integrated at
+`31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8`.
 Real product execution remains macOS arm64 only; deterministic Windows and
 Linux evidence is reserved for Ticket 10. No personal maintainer acceptance is
 claimed.
+
+[Ticket 04](../.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
+is claimed on `agent/ticket-04-overlapping-sessions` from fixed integration
+point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8`. Its public-seam acceptance map
+uses a deterministic source with at least two overlapping sessions, exact
+Codex identity rather than project or label identity, isolated per-session
+polling commits, visible ambiguous-evidence failure, and explicit injected
+Windows/macOS/Linux path-comparison behavior. Restoration, history, deletion,
+live attachment, intervention, and routing remain outside this ticket.
 
 ## Reproduce
 
@@ -251,8 +262,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Integrate resolved Ticket 03, then continue with Tickets 04–10 in dependency
-   order, including a
+2. Continue claimed Ticket 04, then Tickets 05–10 in dependency order,
+   including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check
