@@ -247,7 +247,8 @@ and local IPC seam into the CLI formatter. `npm run verify` passes 22 files,
 and build; the opt-in persisted-Codex check passes in 29.19 seconds. Generic
 review pass 13 is clean, and the first product-preflight verification blocker
 is repaired with a deterministic bounded process-group regression. A wholly
-fresh generic review and independent product preflight remain required.
+fresh generic review pass 14 is clean with zero Standards and zero
+Specification findings; only fresh independent product preflight remains.
 
 ### Ticket 04 delivery chronology
 
@@ -597,6 +598,12 @@ Focused process tests pass, and `npm run verify` passes 22 files, 148 tests,
 and one intentional host-policy skip plus typecheck, lint, and build. Ticket 04
 remains claimed for a wholly fresh generic review and fresh independent
 product preflight.
+Fresh generic review pass 14 is clean across the complete branch from
+`31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` through
+`fd376f82e02540c537f30a24be25ab79ea47ab08`: independent Standards and
+Specification reviewers report zero actionable findings, and the targeted
+process-safety audit reports no blocker. Ticket 04 remains claimed only for a
+fresh independent product preflight; no maintainer acceptance is claimed.
 Ticket 05's stale/degraded recovery semantics, evidence history, deletion,
 live attachment, intervention, and routing remain outside Ticket 04, and no
 maintainer acceptance is claimed.
