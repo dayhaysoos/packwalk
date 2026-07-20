@@ -625,7 +625,10 @@ three Standards findings and two Specification findings are fixed. The second
 fresh review's three Standards smells and one Specification blocker are also
 fixed. The third fresh review's one Standards smell and one Specification
 blocker are fixed as well. Full verification is green; a fourth wholly fresh
-generic review plus independent product preflight remain pending.
+generic review returned zero actionable Specification findings and one
+Standards smell. That duplicated v3 table DDL is now one frozen fragment, with
+its pinned migration checksum unchanged. A fifth wholly fresh generic review
+plus independent product preflight remain pending.
 
 `SessionView` v2 now makes freshness and provenance an explicit closed pair:
 accepted evidence is `fresh`/`Observed`, while last-supported metadata is

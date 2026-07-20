@@ -482,8 +482,7 @@ const migrateLegacySingletonSql = `
   DROP TABLE current_session;
 `
 
-const createVersion3SchemaSql = `
-  CREATE TABLE current_sessions (
+const createVersion3CurrentSessionsTableSql = `CREATE TABLE current_sessions (
     session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
       length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
     ),
@@ -524,7 +523,10 @@ const createVersion3SchemaSql = `
         retention_reason IS NOT NULL
       )
     )
-  );
+  );`
+
+const createVersion3SchemaSql = `
+  ${createVersion3CurrentSessionsTableSql}
 
   CREATE TABLE storage_state (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -543,48 +545,7 @@ const createVersion3SchemaSql = `
 const migrateVersion2OverviewSql = `
   ALTER TABLE current_sessions RENAME TO current_sessions_v2;
 
-  CREATE TABLE current_sessions (
-    session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
-      length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
-    ),
-    protocol_version INTEGER NOT NULL CHECK (protocol_version = 2),
-    project_identity TEXT NOT NULL CHECK (
-      length(CAST(project_identity AS BLOB)) BETWEEN 1 AND 4096
-    ),
-    activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
-    evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
-    state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
-    freshness TEXT NOT NULL CHECK (freshness IN ('fresh', 'stale')),
-    provenance_tag TEXT NOT NULL CHECK (
-      provenance_tag IN ('Observed', 'Retained')
-    ),
-    retention_reason TEXT CHECK (
-      retention_reason IS NULL OR
-      retention_reason IN ('source-unavailable', 'source-unsupported')
-    ),
-    source_updated_at_ms INTEGER NOT NULL CHECK (
-      source_updated_at_ms >= 0 AND
-      source_updated_at_ms <= 8640000000000000
-    ),
-    observed_at_ms INTEGER NOT NULL CHECK (
-      observed_at_ms >= 0 AND
-      observed_at_ms <= 8640000000000000
-    ),
-    commit_sequence INTEGER NOT NULL UNIQUE CHECK (
-      commit_sequence >= 1 AND commit_sequence <= 9007199254740991
-    ),
-    CHECK (
-      (
-        freshness = 'fresh' AND
-        provenance_tag = 'Observed' AND
-        retention_reason IS NULL
-      ) OR (
-        freshness = 'stale' AND
-        provenance_tag = 'Retained' AND
-        retention_reason IS NOT NULL
-      )
-    )
-  );
+  ${createVersion3CurrentSessionsTableSql}
 
   INSERT INTO current_sessions (
     session_id,

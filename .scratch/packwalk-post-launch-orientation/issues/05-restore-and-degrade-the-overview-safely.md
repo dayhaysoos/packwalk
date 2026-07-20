@@ -87,3 +87,9 @@ observed.
   remain visible with different provenance, and repeated reconnect is a no-op.
   Full verification passes 156 tests plus one intentional skip, and the
   installed-Codex test remains green; another wholly fresh review is required.
+- 2026-07-20: The fourth fresh review returned zero actionable Specification
+  findings and one Standards smell. The duplicated v3 `current_sessions` DDL
+  is now one frozen fragment shared by fresh-schema and migration paths. The
+  pinned checksum proves the migration bytes remain exactly unchanged. Full
+  verification and the installed-Codex test remain green; a fifth wholly fresh
+  review is required.
