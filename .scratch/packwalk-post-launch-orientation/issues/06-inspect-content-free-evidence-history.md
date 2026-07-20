@@ -55,7 +55,7 @@ explains each session status without becoming a second transcript archive.
   laws, and compiled text/JSON commands over real local IPC. The opt-in test
   also crossed an installed Codex persisted update through storage, daemon
   publication, IPC, and public history inspection without changing Codex.
-  `npm run verify` passes 26 files, 173 tests, and one intentional host-policy
+  `npm run verify` passes 26 files, 174 tests, and one intentional host-policy
   skip plus typecheck, lint, and the production build.
 - 2026-07-20: A cold real-product command exposed that the former five-second
   client reconnect budget could expire while the new v4 daemon completed its
@@ -86,3 +86,13 @@ explains each session status without becoming a second transcript archive.
   passes three tests, and `npm run verify` passes 26 files, 173 tests, and one
   intentional skip plus typecheck, lint, and build. Another wholly fresh
   generic review remains.
+- 2026-07-20: Fresh generic review pass 3 is clean on Specification and found
+  that an accepting endpoint could complete overview connection readiness
+  before returning its first validated event, ending the startup deadline too
+  early. An accepting-but-silent real-socket regression first failed against
+  that behavior. Overview connection readiness now requires the first decoded
+  protocol-v4 event, leaves it queued for the renderer, and fails if the peer
+  closes before readiness; only later refreshes remain outside the startup
+  deadline. The focused four-file IPC/startup/client suite passes 25 tests, and
+  `npm run verify` passes 26 files, 174 tests, and one intentional skip plus
+  typecheck, lint, and build. Another wholly fresh generic review remains.

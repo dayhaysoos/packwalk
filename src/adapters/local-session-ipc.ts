@@ -286,7 +286,7 @@ export const connectSessionEvents = (
       SessionProtocolEventValue,
       LocalIpcError | Cause.Done
     >(16)
-    const opened = yield* Deferred.make<void, LocalIpcError>()
+    const ready = yield* Deferred.make<void, LocalIpcError>()
     const decodeFrames = yield* frameDecoder(MaximumSessionEventBytes)
     const write = yield* socket.writer
     const request = yield* Schema.encodeEffect(SessionCommandJson)(
@@ -311,7 +311,12 @@ export const connectSessionEvents = (
                     "PackWalk received an invalid session event",
                   ),
                 ),
-                Effect.flatMap((event) => Queue.offer(queue, event)),
+                Effect.flatMap((event) =>
+                  Queue.offer(queue, event).pipe(
+                    Effect.andThen(Deferred.succeed(ready, undefined)),
+                    Effect.asVoid,
+                  ),
+                ),
               ),
             ),
           ),
@@ -325,8 +330,8 @@ export const connectSessionEvents = (
             ),
           ),
           Effect.matchEffect({
-            onFailure: (error) => Deferred.fail(opened, error),
-            onSuccess: () => Deferred.succeed(opened, undefined),
+            onFailure: (error) => Deferred.fail(ready, error),
+            onSuccess: () => Effect.void,
           }),
           Effect.asVoid,
         ),
@@ -345,15 +350,24 @@ export const connectSessionEvents = (
     yield* read.pipe(
       Effect.matchEffect({
         onFailure: (error) =>
-          Deferred.fail(opened, error).pipe(
+          Deferred.fail(ready, error).pipe(
             Effect.andThen(Queue.fail(queue, error)),
             Effect.asVoid,
           ),
-        onSuccess: () => Queue.end(queue).pipe(Effect.asVoid),
+        onSuccess: () => {
+          const error = ipcError(
+            "connection-unavailable",
+            "PackWalk lost its local session connection",
+          )
+          return Deferred.fail(ready, error).pipe(
+            Effect.andThen(Queue.end(queue)),
+            Effect.asVoid,
+          )
+        },
       }),
       Effect.forkScoped,
     )
-    yield* Deferred.await(opened)
+    yield* Deferred.await(ready)
 
     return Stream.fromQueue(queue)
   })

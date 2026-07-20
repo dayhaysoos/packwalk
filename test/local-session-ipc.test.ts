@@ -12,6 +12,7 @@ import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result, Stream } from "effect"
+import { TestClock } from "effect/testing"
 
 import {
   connectSessionEvents,
@@ -19,6 +20,7 @@ import {
   makeSessionEventServer,
   runSessionEventServer,
 } from "../src/adapters/local-session-ipc.js"
+import { connectOrStart } from "../src/application/cli-startup.js"
 import {
   MaximumSessionEventBytes,
   ProjectIdentity,
@@ -73,6 +75,7 @@ const closeServer = (server: Server): Effect.Effect<void> =>
 const makeRawEventServer = (
   endpoint: string,
   chunks: ReadonlyArray<Uint8Array>,
+  onRequest: () => void = () => undefined,
 ): Effect.Effect<Server, Error, import("effect").Scope.Scope> =>
   Effect.acquireRelease(
     Effect.tryPromise({
@@ -82,10 +85,11 @@ const makeRawEventServer = (
           sockets.add(socket)
           socket.once("close", () => sockets.delete(socket))
           socket.once("data", () => {
+            onRequest()
             const send = (index: number): void => {
               const chunk = chunks[index]
               if (chunk === undefined) {
-                socket.end()
+                if (chunks.length > 0) socket.end()
                 return
               }
               socket.write(chunk, () => setTimeout(() => send(index + 1), 5))
@@ -264,6 +268,44 @@ it.effect("encodes and decodes the public session event stream across local IPC"
     expect(Array.from(yield* Fiber.join(received))).toEqual(
       Array.from(yield* Stream.runCollect(events)),
     )
+  }),
+)
+
+it.effect("keeps an accepting endpoint under the deadline until its first overview", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = makeEndpoint(directory)
+    let resolveRequest = (): void => undefined
+    const requestReceived = new Promise<void>((resolve) => {
+      resolveRequest = resolve
+    })
+    yield* makeRawEventServer(endpoint, [], resolveRequest)
+
+    const connected = yield* connectOrStart({
+      connect: connectSessionEvents(endpoint),
+      startDaemon: Effect.die("An accepting endpoint must not start a daemon"),
+      retryDelay: "100 millis",
+      retryAttempts: 300,
+      startupDeadline: "250 millis",
+    }).pipe(Effect.result, Effect.forkChild)
+
+    yield* Effect.promise(() => requestReceived)
+    expect(connected.pollUnsafe()).toBeUndefined()
+    yield* TestClock.adjust("249 millis")
+    expect(connected.pollUnsafe()).toBeUndefined()
+    yield* TestClock.adjust("1 milli")
+
+    const result = yield* Fiber.join(connected)
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "PackWalk.CliStartupError",
+        reason: "startup-deadline-exceeded",
+      })
+    }
   }),
 )
 

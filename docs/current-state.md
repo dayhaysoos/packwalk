@@ -716,7 +716,7 @@ repeat inspection, prohibited content, and injected Windows/macOS/Linux
 encoding and path behavior. Compiled text and JSON inspection crossed real
 local IPC, and the opt-in installed-Codex check crossed a real persisted update
 through storage, publication, IPC, and public history inspection without
-changing Codex. `npm run verify` passes 26 files, 173 tests, and one intentional
+changing Codex. `npm run verify` passes 26 files, 174 tests, and one intentional
 host-policy skip plus typecheck, lint, and the production build.
 
 A cold real-product run also exposed that the former five-second reconnect
@@ -752,6 +752,18 @@ regression proved the command could remain pending at the claimed deadline.
 connection attempts under one explicit elapsed deadline; overview and history
 commands both supply thirty seconds. The focused deadline suite passes three
 tests, and full verification passes 26 files, 173 tests, and one intentional
+skip plus typecheck, lint, and build. Another wholly fresh generic review
+remains.
+
+Fresh generic review pass 3 reports zero Specification findings and one
+Standards blocker: an accepting endpoint could complete overview connection
+readiness before returning its first validated event, ending the startup
+deadline too early. An accepting-but-silent real-socket regression first failed
+against that behavior. Overview readiness now requires the first decoded
+protocol-v4 event, preserves it in the downstream queue, and fails if the peer
+closes before readiness; only subsequent refreshing remains outside the
+startup deadline. The focused four-file IPC/startup/client suite passes 25
+tests, and full verification passes 26 files, 174 tests, and one intentional
 skip plus typecheck, lint, and build. Another wholly fresh generic review
 remains.
 
