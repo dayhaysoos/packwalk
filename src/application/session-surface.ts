@@ -21,6 +21,7 @@ import {
   type SessionStorageSnapshot,
 } from "./session-storage.js"
 import {
+  encodeSessionProtocolEvent,
   matchTransition,
   matchSessionTransitionTrigger,
   sameSessionIdentity,
@@ -81,6 +82,13 @@ const storageUnavailableEvent = (): SessionProtocolEvent =>
     protocolVersion: 2,
     code: "storage-unavailable",
     message: "PackWalk could not commit its current session view",
+  })
+
+const overviewUnavailableEvent = (): SessionProtocolEvent =>
+  SessionProtocolEvent.cases.SessionUnavailable.make({
+    protocolVersion: 2,
+    code: "overview-unavailable",
+    message: "PackWalk could not publish its current session overview",
   })
 
 const sourceErrorEvent = (error: SessionSourceError): SessionProtocolEvent => {
@@ -313,6 +321,13 @@ const updatedEvent = (
   })
 }
 
+const ensurePublishableEvent = Effect.fn(
+  "SessionSurface.ensurePublishableEvent",
+)(function* (event: SessionProtocolEvent) {
+  yield* encodeSessionProtocolEvent(event)
+  return event
+})
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -344,6 +359,16 @@ export const layer = Layer.effect(
           }
 
           const reduced = reducedResult.success
+          const eventResult = yield* ensurePublishableEvent(
+            snapshotEvent(reduced.views),
+          ).pipe(Effect.result)
+          if (Result.isFailure(eventResult)) {
+            return {
+              event: overviewUnavailableEvent(),
+              snapshot: restored,
+            }
+          }
+
           if (reduced.changedViews.length > 0) {
             const commitResult = yield* storage
               .commit(restored.lastCommitSequence, reduced.changedViews)
@@ -357,7 +382,7 @@ export const layer = Layer.effect(
           }
 
           return {
-            event: snapshotEvent(reduced.views),
+            event: eventResult.success,
             snapshot: {
               views: reduced.views,
               lastCommitSequence: reduced.lastCommitSequence,
@@ -442,8 +467,26 @@ export const layer = Layer.effect(
       const reduced = reducedResult.success
       if (reduced.changedViews.length === 0) {
         if (currentEvent._tag === "SessionUnavailable") {
-          yield* eventState.publish(snapshotEvent(reduced.views), current)
+          const eventResult = yield* ensurePublishableEvent(
+            snapshotEvent(reduced.views),
+          ).pipe(Effect.result)
+          yield* eventState.publish(
+            Result.isFailure(eventResult)
+              ? overviewUnavailableEvent()
+              : eventResult.success,
+            current,
+          )
         }
+        return
+      }
+
+      const eventResult = yield* ensurePublishableEvent(
+        currentEvent._tag === "SessionUnavailable"
+          ? snapshotEvent(reduced.views)
+          : updatedEvent(reduced),
+      ).pipe(Effect.result)
+      if (Result.isFailure(eventResult)) {
+        yield* eventState.publish(overviewUnavailableEvent())
         return
       }
 
@@ -458,7 +501,7 @@ export const layer = Layer.effect(
             onFailure: () =>
               eventState.publish(storageUnavailableEvent()),
             onSuccess: () =>
-              eventState.publish(updatedEvent(reduced), nextSnapshot),
+              eventState.publish(eventResult.success, nextSnapshot),
           }),
         )
     })

@@ -14,8 +14,9 @@ import {
 import type * as SocketServer from "effect/unstable/socket/SocketServer"
 
 import {
+  encodeSessionProtocolEvent,
   MaximumSessionEventBytes,
-  SessionProtocolEvent,
+  SessionProtocolEventJson,
   type SessionProtocolEvent as SessionProtocolEventValue,
 } from "../domain/session.js"
 
@@ -30,7 +31,6 @@ export const SessionCommand = Schema.TaggedUnion({
 export type SessionCommand = typeof SessionCommand.Type
 
 const SessionCommandJson = Schema.fromJsonString(SessionCommand)
-const SessionProtocolEventJson = Schema.fromJsonString(SessionProtocolEvent)
 
 export class LocalIpcError extends Schema.TaggedErrorClass<LocalIpcError>()(
   "PackWalk.LocalIpcError",
@@ -186,21 +186,12 @@ const serveClient = (
 
       yield* events.pipe(
         Stream.runForEach((event) =>
-          Schema.encodeEffect(SessionProtocolEventJson)(event).pipe(
+          encodeSessionProtocolEvent(event).pipe(
             Effect.mapError(() =>
               ipcError(
                 "invalid-frame",
                 "PackWalk could not encode a session event",
               ),
-            ),
-            Effect.filterOrFail(
-              (encoded) =>
-                Buffer.byteLength(encoded, "utf8") <= MaximumSessionEventBytes,
-              () =>
-                ipcError(
-                  "invalid-frame",
-                  "PackWalk could not encode a session event",
-                ),
             ),
             Effect.flatMap((encoded) => write(`${encoded}\n`)),
           ),

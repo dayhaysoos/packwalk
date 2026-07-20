@@ -1,8 +1,13 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
 
 import {
   CodexPersistedFact,
+  MaximumSessionEventBytes,
+  ProjectIdentity,
+  SessionIdentity,
+  SessionProtocolEventJson,
+  SessionState,
   SessionView,
 } from "../src/domain/session.js"
 
@@ -160,6 +165,62 @@ it.effect("accepts only timestamps representable by JavaScript Date", () =>
           })(schemaAndValue[1]),
         ),
       ).toBeDefined()
+    }
+  }),
+)
+
+it.effect("rejects otherwise-valid protocol-v2 overviews above the public frame limit", () =>
+  Effect.gen(function* () {
+    const escapedIdentityPrefix = "\0".repeat(4_090)
+    const maximumProjectIdentity = ProjectIdentity.make("\0".repeat(4_096))
+    const views = Array.from({ length: 85 }, (_, index) =>
+      SessionView.make({
+        protocolVersion: 1,
+        sessionId: SessionIdentity.make(
+          `${escapedIdentityPrefix}${String(index).padStart(6, "0")}`,
+        ),
+        projectIdentity: maximumProjectIdentity,
+        activity: "persisted Codex activity",
+        evidenceSource: "codex-sqlite-thread-index",
+        state: SessionState.cases.Discovered.make({}),
+        freshness: "fresh",
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 2_000,
+        commitSequence: index + 1,
+      }),
+    )
+    const lastView = views[84]
+    if (lastView === undefined) return yield* Effect.die("missing fixture view")
+
+    const overviews = [
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views,
+      },
+      {
+        _tag: "SessionsUpdated",
+        protocolVersion: 2,
+        views,
+        changedSessionIds: [lastView.sessionId],
+      },
+    ] as const
+
+    for (const overview of overviews) {
+      const encoded = JSON.stringify(overview)
+      expect(new TextEncoder().encode(encoded).byteLength)
+        .toBeGreaterThan(MaximumSessionEventBytes)
+      const decoded = yield* Schema.decodeUnknownEffect(
+        SessionProtocolEventJson,
+        { onExcessProperty: "error" },
+      )(encoded).pipe(Effect.result)
+      const reencoded = yield* Schema.encodeUnknownEffect(
+        SessionProtocolEventJson,
+        { onExcessProperty: "error" },
+      )(overview).pipe(Effect.result)
+
+      expect(Result.isFailure(decoded)).toBe(true)
+      expect(Result.isFailure(reencoded)).toBe(true)
     }
   }),
 )

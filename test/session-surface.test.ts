@@ -14,6 +14,31 @@ import {
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
 
+const makeMaximumEscapedFacts = (
+  length: number,
+): ReadonlyArray<CodexPersistedFact> => {
+  const identityPrefix = "\0".repeat(4_090)
+  const projectIdentity = ProjectIdentity.make("\0".repeat(4_096))
+
+  return Array.from({ length }, (_, index) =>
+    CodexPersistedFact.make({
+      version: 1,
+      sessionId: SessionIdentity.make(
+        `${identityPrefix}${String(index).padStart(6, "0")}`,
+      ),
+      projectIdentity,
+      sourceUpdatedAtMs: 1_000,
+    }),
+  )
+}
+
+const eventAvailability = (
+  event: { readonly _tag: string; readonly code?: string },
+) => ({
+  _tag: event._tag,
+  code: event.code,
+})
+
 it.effect("publishes one committed discovered snapshot and one committed polling update", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
@@ -253,6 +278,90 @@ it.effect("rejects crossed exact polling results before publishing a session upd
         ],
       },
     ])
+  }),
+)
+
+it.effect("rejects an unpublishable startup overview before committing it", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const publishableFacts = makeMaximumEscapedFacts(84)
+    const surface = yield* makeDeterministicSessionSurface(
+      makeMaximumEscapedFacts(85),
+    )
+
+    const unavailable = Array.from(
+      yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
+    )[0]
+    expect(unavailable === undefined ? undefined : eventAvailability(unavailable))
+      .toEqual({
+        _tag: "SessionUnavailable",
+        code: "overview-unavailable",
+      })
+    expect(yield* surface.storedSnapshot()).toMatchObject({
+      views: [],
+      lastCommitSequence: 0,
+    })
+
+    yield* surface.replaceSourceFactsForTest(publishableFacts)
+    yield* surface.refresh()
+
+    const recovered = Array.from(
+      yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
+    )[0]
+    expect(recovered?._tag).toBe("SessionsSnapshot")
+    if (recovered?._tag !== "SessionsSnapshot") return
+    expect(recovered.views).toHaveLength(84)
+    expect(recovered.views.at(-1)?.commitSequence).toBe(84)
+    expect(yield* surface.storedSnapshot()).toMatchObject({
+      lastCommitSequence: 84,
+    })
+  }),
+)
+
+it.effect("rejects an unpublishable overview update before advancing stored state", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const publishableFacts = makeMaximumEscapedFacts(84)
+    const oversizedFacts = makeMaximumEscapedFacts(85)
+    const surface = yield* makeDeterministicSessionSurface(publishableFacts)
+    const initialObserved = yield* Deferred.make<void>()
+    const collected = yield* surface.events.pipe(
+      Stream.tap(() => Deferred.succeed(initialObserved, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+
+    yield* Deferred.await(initialObserved)
+    yield* surface.replaceSourceFactsForTest(oversizedFacts)
+    yield* surface.refresh()
+
+    const events = Array.from(yield* Fiber.join(collected))
+    expect(events[0]?._tag).toBe("SessionsSnapshot")
+    expect(events[0]?._tag === "SessionsSnapshot" ? events[0].views.length : 0)
+      .toBe(84)
+    expect(events[1] === undefined ? undefined : eventAvailability(events[1]))
+      .toEqual({
+        _tag: "SessionUnavailable",
+        code: "overview-unavailable",
+      })
+
+    const unchanged = yield* surface.storedSnapshot()
+    expect(unchanged.views).toHaveLength(84)
+    expect(unchanged.lastCommitSequence).toBe(84)
+    expect(unchanged.views.some((view) =>
+      view.sessionId === oversizedFacts[84]?.sessionId
+    )).toBe(false)
+
+    yield* surface.replaceSourceFactsForTest(publishableFacts)
+    yield* surface.refresh()
+    const recovered = Array.from(
+      yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
+    )[0]
+    expect(recovered?._tag).toBe("SessionsSnapshot")
+    if (recovered?._tag !== "SessionsSnapshot") return
+    expect(recovered.views).toHaveLength(84)
+    expect(recovered.views.at(-1)?.commitSequence).toBe(84)
   }),
 )
 

@@ -1,4 +1,4 @@
-import { Data, Option, Result, Schema } from "effect"
+import { Data, Option, Result, Schema, SchemaTransformation } from "effect"
 
 export const MaximumIdentityBytes = 4 * 1024
 export const MaximumSessionEventBytes = 4 * 1024 * 1024
@@ -109,6 +109,8 @@ const sourceAmbiguousMessage =
   "PackWalk found ambiguous Codex persisted evidence" as const
 const storageUnavailableMessage =
   "PackWalk could not commit its current session view" as const
+const overviewUnavailableMessage =
+  "PackWalk could not publish its current session overview" as const
 
 const SessionsSnapshotFields = {
   protocolVersion: Schema.Literal(2),
@@ -126,12 +128,14 @@ const SessionUnavailableCode = Schema.Literals([
   "source-incompatible",
   "source-unavailable",
   "storage-unavailable",
+  "overview-unavailable",
 ])
 
 const SessionUnavailableMessage = Schema.Literals([
   sourceAmbiguousMessage,
   sourceUnavailableMessage,
   storageUnavailableMessage,
+  overviewUnavailableMessage,
 ])
 
 interface SessionEventConsistencyInput {
@@ -166,15 +170,18 @@ const SessionEventConsistency = Schema.makeFilter<SessionEventConsistencyInput>(
     }
 
     if (
-      event.code === "source-ambiguous" &&
+      (event.code === "source-ambiguous" ||
+        event.code === "overview-unavailable") &&
       event.protocolVersion !== 2
     ) {
-      return "ambiguous session evidence requires protocol version 2"
+      return "this unavailable session result requires protocol version 2"
     }
 
     const valid =
       event.code === "storage-unavailable"
         ? event.message === storageUnavailableMessage
+        : event.code === "overview-unavailable"
+          ? event.message === overviewUnavailableMessage
         : event.code === "source-ambiguous"
           ? event.message === sourceAmbiguousMessage
           : event.message === sourceUnavailableMessage
@@ -216,6 +223,29 @@ export const SessionProtocolEvent = Schema.TaggedUnion({
 }).check(SessionEventConsistency)
 
 export type SessionProtocolEvent = typeof SessionProtocolEvent.Type
+
+const SessionProtocolEventJsonString = Schema.String.check(
+  Schema.makeFilter((encoded) =>
+    identityEncoder.encode(encoded).byteLength <= MaximumSessionEventBytes
+      ? undefined
+      : "session event exceeds PackWalk's UTF-8 frame limit",
+  ),
+)
+
+const SessionProtocolEventJsonValue = SessionProtocolEventJsonString.pipe(
+  Schema.decodeTo(
+    Schema.Unknown,
+    SchemaTransformation.fromJsonString,
+  ),
+)
+
+export const SessionProtocolEventJson = SessionProtocolEventJsonValue.pipe(
+  Schema.decodeTo(SessionProtocolEvent),
+)
+
+export const encodeSessionProtocolEvent = Schema.encodeEffect(
+  SessionProtocolEventJson,
+)
 
 export class IllegalSessionTransition extends Schema.TaggedErrorClass<IllegalSessionTransition>()(
   "PackWalk.IllegalSessionTransition",

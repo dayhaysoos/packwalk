@@ -17,6 +17,7 @@ import {
 import {
   Service as SessionStorage,
   type Interface as SessionStorageInterface,
+  type SessionStorageSnapshot,
 } from "../../src/application/session-storage.js"
 import {
   CodexPersistedFact,
@@ -37,7 +38,11 @@ interface PersistSourceUpdate {
 export interface DeterministicSessionSurface {
   readonly events: Stream.Stream<SessionEvent>
   readonly persistSourceUpdate: PersistSourceUpdate
+  readonly replaceSourceFactsForTest: (
+    facts: ReadonlyArray<CodexPersistedFact>,
+  ) => Effect.Effect<void>
   readonly refresh: () => Effect.Effect<void>
+  readonly storedSnapshot: () => Effect.Effect<SessionStorageSnapshot, unknown>
 }
 
 export interface DeterministicSessionSurfaceOptions {
@@ -205,9 +210,13 @@ export const makeDeterministicSessionSurface = (
         }),
       )
     }
+    const storageContext = yield* Layer.build(
+      sqliteSessionStorageLayer(storagePath),
+    )
+    const storage = Context.get(storageContext, SessionStorage)
     const dependencies = Layer.mergeAll(
       Layer.succeed(SessionSource, SessionSource.of(source)),
-      sqliteSessionStorageLayer(storagePath),
+      Layer.succeed(SessionStorage, storage),
     )
     const context = yield* Layer.build(
       sessionSurfaceLayer.pipe(Layer.provide(dependencies)),
@@ -218,6 +227,8 @@ export const makeDeterministicSessionSurface = (
     return {
       events: surface.events,
       persistSourceUpdate,
+      replaceSourceFactsForTest: (facts) => Ref.set(factRef, facts),
       refresh: surface.refresh,
+      storedSnapshot: storage.load,
     }
   })

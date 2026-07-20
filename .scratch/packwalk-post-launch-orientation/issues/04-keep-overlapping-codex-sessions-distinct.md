@@ -121,3 +121,26 @@ sessions overlap, share a repository, or have duplicate display labels.
   exact identities through text and protocol-v2 JSON with zero exits and empty
   stderr. Ticket 04 remains claimed for a wholly fresh generic review and
   independent product preflight; no maintainer acceptance is claimed.
+- 2026-07-20: Fresh generic review pass 3 reports zero actionable
+  Specification findings and one P1 Standards blocker. The domain accepts an
+  unbounded protocol-v2 overview, while IPC rejects its complete encoding over
+  4 MiB; the surface currently commits that state before publication. A
+  strictly decoded 90-row maximum-size snapshot measured 4,444,968 bytes
+  against the 4,194,304-byte frame limit, so legitimate persisted evidence can
+  become durably unpublishable. Ticket 04 remains claimed while a red
+  overview-level regression and an Effect-based pre-commit validation seam
+  prove that every accepted v2 event is transportable. Full verification and
+  an entirely fresh generic review follow; product preflight remains paused.
+- 2026-07-20: The pass-3 P1 blocker is repaired with red-first startup,
+  update, and protocol regressions. One exported Effect JSON codec now enforces
+  the exact 4 MiB UTF-8 limit on both encode and decode, and local IPC uses that
+  codec without a second outgoing-size policy. The surface validates each
+  complete snapshot or update before storage commit. An unpublishable overview
+  emits the small redacted protocol-v2 `overview-unavailable` result, preserves
+  the last durable rows and commit sequence, and recovers through a bounded
+  snapshot when source evidence becomes publishable. Focused verification
+  passes 26 tests; `npm run verify` passes 21 files and 99 tests plus typecheck,
+  lint, and build; and the opt-in persisted-Codex check passes in 8.18 seconds.
+  A supplemental Effect/IPC audit reports zero actionable findings. Ticket 04
+  remains claimed for a wholly fresh generic review and independent product
+  preflight; no maintainer acceptance is claimed.

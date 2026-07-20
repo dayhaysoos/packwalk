@@ -274,8 +274,22 @@ tests, `npm run verify` passes 21 files and 96 tests plus typecheck, lint, and
 build, and the opt-in persisted-Codex check passes in 8.22 seconds. The compiled
 product again returned all 19 unique exact identities through text and
 protocol-v2 JSON with zero exits and empty stderr. Ticket 04 remains claimed
-for another wholly fresh generic review; independent product preflight has not
-started.
+after fresh generic review pass 3 reported zero Specification findings and one
+P1 Standards blocker. Protocol v2 currently accepts an unbounded overview,
+then commits it before IPC applies its 4 MiB frame limit. A strictly decoded
+90-row maximum-size snapshot measured 4,444,968 bytes against the 4,194,304-byte
+limit, proving that legitimate persisted evidence can become durably
+unpublishable. That blocker now has red-first startup, update, and protocol
+regressions plus one exported Effect JSON codec that enforces the exact 4 MiB
+UTF-8 limit on encode and decode. IPC uses the same codec, and the surface
+validates each complete event before storage commit. An unpublishable overview
+emits redacted protocol-v2 `overview-unavailable`, preserves the last durable
+rows and commit sequence, and recovers through a bounded snapshot. Focused
+verification passes 26 tests; `npm run verify` passes 21 files and 99 tests plus
+typecheck, lint, and build; and the opt-in persisted-Codex check passes in 8.18
+seconds. A supplemental Effect/IPC audit reports zero actionable findings.
+Ticket 04 remains claimed for another wholly fresh generic review; independent
+product preflight remains paused until that review is clean.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 
