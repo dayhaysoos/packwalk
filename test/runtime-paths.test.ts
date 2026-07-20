@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { homedir, tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { NodeServices } from "@effect/platform-node"
@@ -29,19 +29,24 @@ import {
   runtimePathsLayer,
   verifyRuntimeAuthority,
 } from "../src/adapters/runtime-paths.js"
+import { claimSessionDaemonEndpoint } from "../src/daemon/endpoint-ownership.js"
 
 const databaseAuthority = (
   fileId: bigint = 1n,
   databaseName = "packwalk-v2.sqlite",
+  directoryPath = "/durable/packwalk",
 ): DurableDatabaseAuthority => ({
   deviceId: 1n,
   fileId,
   databaseName,
+  directoryPath,
   targetKind: "directory",
 })
 
 const identifyAs = (authority: DurableDatabaseAuthority) => () => authority
 const identifyTestDatabase = identifyAs(databaseAuthority())
+const nativeTempDirectory =
+  process.platform === "darwin" ? "/private/tmp" : tmpdir()
 
 const nativeRuntimeInput = (root: string): RuntimePathInputs => {
   switch (process.platform) {
@@ -89,6 +94,47 @@ describe("PackWalk runtime paths", () => {
     expect(paths.ipcEndpoint).toBe(
       `${paths.ipcDirectory}/daemon-v2.sock`,
     )
+  })
+
+  it("keeps an ordinary macOS writer-authority socket within its native limit", () => {
+    const paths = deriveRuntimePaths(
+      {
+        platform: "darwin",
+        homeDirectory: "/Users/nickdejesus",
+      },
+      identifyAs(
+        databaseAuthority(
+          1n,
+          "packwalk-v2.sqlite",
+          "/Users/nickdejesus/Library/Application Support/PackWalk",
+        ),
+      ),
+    )
+
+    expect(Buffer.byteLength(paths.daemonLockEndpoint)).toBeLessThanOrEqual(
+      103,
+    )
+    expect(paths.daemonLockEndpoint).toMatch(
+      /\/\.pw-[A-Za-z0-9_-]{16}$/,
+    )
+  })
+
+  it("rejects an overlong Unix writer-authority path before socket bind", () => {
+    expect(() =>
+      deriveRuntimePaths(
+        {
+          platform: "linux",
+          homeDirectory: "/home/example",
+        },
+        identifyAs(
+          databaseAuthority(
+            1n,
+            "packwalk-v2.sqlite",
+            `/${"a".repeat(103)}`,
+          ),
+        ),
+      ),
+    ).toThrow("Daemon writer-authority path exceeds the Unix socket limit")
   })
 
   it("honors XDG directories on Linux", () => {
@@ -263,8 +309,8 @@ describe("PackWalk runtime paths", () => {
   it.effect(
     "rejects hard-linked database entries during resolution and revalidation",
     () => {
-      const firstRoot = mkdtempSync(join(tmpdir(), "packwalk-hard-link-a-"))
-      const secondRoot = mkdtempSync(join(tmpdir(), "packwalk-hard-link-b-"))
+      const firstRoot = mkdtempSync(join(nativeTempDirectory, "pw-ha-"))
+      const secondRoot = mkdtempSync(join(nativeTempDirectory, "pw-hb-"))
 
       return Effect.gen(function* () {
         yield* Effect.addFinalizer(() =>
@@ -320,7 +366,7 @@ describe("PackWalk runtime paths", () => {
   it.skipIf(process.platform === "win32")(
     "uses one endpoint for physical database aliases before and after the database exists",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-path-alias-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-pa-"))
 
       try {
         const physicalDataRoot = join(testRoot, "physical-data")
@@ -435,17 +481,18 @@ describe("PackWalk runtime paths", () => {
     },
   )
 
-  it.skipIf(
+  it.effect.skipIf(
     process.platform !== "darwin" ||
-      !existsSync(`/System/Volumes/Data${homedir()}`),
+      !existsSync("/System/Volumes/Data/private/tmp"),
   )(
-    "uses one endpoint for native macOS firmlink spellings of one database authority",
+    "uses one writer authority through native macOS firmlink spellings",
     () => {
-      const physicalHome = mkdtempSync(
-        join(homedir(), ".packwalk-firmlink-test-"),
-      )
+      const physicalHome = mkdtempSync("/private/tmp/pw-f-")
 
-      try {
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(physicalHome, { recursive: true, force: true })),
+        )
         const physicalDataRoot = join(
           physicalHome,
           "Library",
@@ -482,16 +529,35 @@ describe("PackWalk runtime paths", () => {
           physical.packWalkDatabasePath,
         )
         expect(firmlink.ipcEndpoint).toBe(physical.ipcEndpoint)
-      } finally {
-        rmSync(physicalHome, { recursive: true, force: true })
-      }
+        expect(firmlink.daemonLockEndpoint).not.toBe(
+          physical.daemonLockEndpoint,
+        )
+        expect(
+          Buffer.byteLength(firmlink.daemonLockEndpoint),
+        ).toBeLessThanOrEqual(103)
+
+        const owner = yield* claimSessionDaemonEndpoint(
+          physical.daemonLockEndpoint,
+        )
+        expect(owner._tag).toBe("Owned")
+        if (owner._tag !== "Owned") {
+          return yield* Effect.die("Expected physical writer authority")
+        }
+        yield* owner.server
+          .run(() => Effect.void)
+          .pipe(Effect.forkScoped)
+
+        expect(
+          (yield* claimSessionDaemonEndpoint(firmlink.daemonLockEndpoint))._tag,
+        ).toBe("AlreadyRunning")
+      }).pipe(Effect.provide(NodeServices.layer))
     },
   )
 
   it.skipIf(process.platform === "win32")(
     "rejects a dangling final database symlink instead of using its spelling",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-dangling-db-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-dd-"))
       const databasePath = join(
         testRoot,
         "packwalk",
@@ -511,7 +577,7 @@ describe("PackWalk runtime paths", () => {
   it.skipIf(process.platform === "win32")(
     "rejects a final database symlink into a shared parent without changing it",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-shared-db-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-sd-"))
       const sharedDirectory = join(testRoot, "shared")
       const targetDatabasePath = join(sharedDirectory, "packwalk-v2.sqlite")
       const databasePath = join(
@@ -539,7 +605,7 @@ describe("PackWalk runtime paths", () => {
   it.effect.skipIf(process.platform === "win32")(
     "fails verification when the prepared database directory identity changes",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-authority-swap-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-as-"))
       const dataRoot = join(testRoot, "data")
       mkdirSync(dataRoot)
       const paths = deriveRuntimePaths(
@@ -571,7 +637,7 @@ describe("PackWalk runtime paths", () => {
   it.effect.skipIf(process.platform === "win32")(
     "rejects a replaced data directory before preparation mutates its target",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-prepare-swap-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-ps-"))
       const dataRoot = join(testRoot, "data")
       const unrelatedDirectory = join(testRoot, "unrelated")
       mkdirSync(dataRoot)
@@ -622,7 +688,7 @@ describe("PackWalk runtime paths", () => {
   it.effect.skipIf(process.platform === "win32")(
     "rejects a symlinked Unix endpoint directory without changing its target",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-ipc-symlink-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-is-"))
       const targetDirectory = join(testRoot, "target")
       const ipcDirectory = join(testRoot, "predictable-ipc-leaf")
       mkdirSync(targetDirectory, { mode: 0o755 })
@@ -656,6 +722,7 @@ describe("PackWalk runtime paths", () => {
                 "packwalk-v2.sqlite",
               ),
               packWalkDatabaseAuthority: databaseAuthority(),
+              daemonLockEndpoint: join(testRoot, "data", "writer.sock"),
               ipcDirectory,
               ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
             }),
@@ -670,7 +737,7 @@ describe("PackWalk runtime paths", () => {
   it.effect.skipIf(process.platform === "win32")(
     "creates and re-secures an owned Unix endpoint after data authority is prepared",
     () => {
-      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-ipc-private-test-"))
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-ip-"))
       const dataDirectory = join(testRoot, "data")
       const ipcDirectory = join(testRoot, "predictable-ipc-leaf")
       mkdirSync(dataDirectory, { mode: 0o700 })
@@ -689,6 +756,7 @@ describe("PackWalk runtime paths", () => {
           "packwalk-v2.sqlite",
         ),
         packWalkDatabaseAuthority: databaseAuthority(),
+        daemonLockEndpoint: join(dataDirectory, "writer.sock"),
         ipcDirectory,
         ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
       })

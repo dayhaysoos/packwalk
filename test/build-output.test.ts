@@ -86,7 +86,9 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
   mkdirSync(staleDirectory, { recursive: true })
   writeFileSync(staleArtifact, "stale generated output\n", "utf8")
 
-  const testRoot = mkdtempSync(join(tmpdir(), "pw3-"))
+  const nativeTempDirectory =
+    process.platform === "darwin" ? "/private/tmp" : tmpdir()
+  const testRoot = mkdtempSync(join(nativeTempDirectory, "pw3-"))
   const homeDirectory = join(testRoot, "home")
   const tempDirectory = join(testRoot, "temp")
   const runtimeDirectory = join(testRoot, "runtime")

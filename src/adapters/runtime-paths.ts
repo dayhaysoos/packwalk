@@ -41,6 +41,7 @@ export interface RuntimePathsValue {
   readonly legacyPackWalkDatabasePath: string
   readonly packWalkDatabasePath: string
   readonly packWalkDatabaseAuthority: DurableDatabaseAuthority
+  readonly daemonLockEndpoint: string
   readonly ipcDirectory?: string
   readonly ipcEndpoint: string
 }
@@ -49,12 +50,14 @@ export interface DurableDatabaseAuthority {
   readonly deviceId: bigint
   readonly fileId: bigint
   readonly databaseName: string
+  readonly directoryPath: string
   readonly targetKind: "directory"
 }
 
 // Incompatible command/event protocols use distinct endpoints so a newly
 // installed client cannot silently connect to a persistent older daemon.
 const sessionIpcNamespace = "v2"
+const maximumPortableUnixSocketPathBytes = 103
 
 export type DurablePathIdentifier = (
   path: string,
@@ -96,6 +99,7 @@ const captureNativeDirectoryAuthority = (
   directory: string,
   databaseName: string,
 ): DurableDatabaseAuthority => {
+  const directoryPath = realpathSync.native(directory)
   const normalizedDatabaseName = normalizeDatabaseName(
     databaseName,
     process.platform === "win32" ? "win32" : "linux",
@@ -110,6 +114,7 @@ const captureNativeDirectoryAuthority = (
       deviceId: identity.dev,
       fileId: identity.ino,
       databaseName: normalizedDatabaseName,
+      directoryPath,
       targetKind: "directory" as const,
     }
     requireUsableDirectoryAuthority(authority)
@@ -117,7 +122,7 @@ const captureNativeDirectoryAuthority = (
   }
 
   const descriptor = openSync(
-    realpathSync.native(directory),
+    directoryPath,
     fileSystemConstants.O_RDONLY |
       fileSystemConstants.O_DIRECTORY |
       fileSystemConstants.O_NOFOLLOW,
@@ -139,6 +144,7 @@ const captureNativeDirectoryAuthority = (
       deviceId: identity.dev,
       fileId: identity.ino,
       databaseName: normalizedDatabaseName,
+      directoryPath,
       targetKind: "directory" as const,
     }
     requireUsableDirectoryAuthority(authority)
@@ -254,6 +260,23 @@ const durableDatabaseToken = (
     .digest("hex")
     .slice(0, 24)
 
+const unixDaemonLockEndpoint = (
+  authority: DurableDatabaseAuthority,
+  databaseToken: string,
+): string => {
+  const writerToken = Buffer.from(databaseToken, "hex").toString("base64url")
+  const endpoint = posix.join(
+    authority.directoryPath,
+    `.pw-${writerToken}`,
+  )
+  if (Buffer.byteLength(endpoint) > maximumPortableUnixSocketPathBytes) {
+    throw new Error(
+      "Daemon writer-authority path exceeds the Unix socket limit",
+    )
+  }
+  return endpoint
+}
+
 export const deriveRuntimePaths = (
   input: RuntimePathInputs,
   identifyDurablePath: DurablePathIdentifier,
@@ -303,6 +326,7 @@ export const deriveRuntimePaths = (
       ),
       packWalkDatabasePath,
       packWalkDatabaseAuthority,
+      daemonLockEndpoint: `\\\\.\\pipe\\packwalk-${sessionIpcNamespace}-${databaseToken}-writer`,
       ipcEndpoint: `\\\\.\\pipe\\packwalk-${sessionIpcNamespace}-${databaseToken}`,
     }
   }
@@ -332,6 +356,10 @@ export const deriveRuntimePaths = (
     "/tmp",
     `packwalk-${sessionIpcNamespace}-${databaseToken}`,
   )
+  const daemonLockEndpoint = unixDaemonLockEndpoint(
+    packWalkDatabaseAuthority,
+    databaseToken,
+  )
 
   return {
     codexDatabasePath: posix.join(codexHome, "state_5.sqlite"),
@@ -342,6 +370,7 @@ export const deriveRuntimePaths = (
     ),
     packWalkDatabasePath,
     packWalkDatabaseAuthority,
+    daemonLockEndpoint,
     ipcDirectory,
     ipcEndpoint: posix.join(
       ipcDirectory,

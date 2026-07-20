@@ -360,7 +360,50 @@ JSON and text clients each exited zero with empty stderr and returned all 19
 unique exact identities; JSON was a protocol-v2 `SessionsSnapshot`. The
 positively identified v2 endpoint owner PID 98474 was stopped, while
 pre-existing v1 PID 77857 remains running and untouched. An entirely fresh
-generic review remains required; product preflight remains paused.
+generic review pass 8 reports zero actionable Specification findings and one
+P1 Standards blocker in daemon election. A live Unix endpoint directory under
+`/tmp` can be renamed, recreated at its original pathname, and rebound while
+the first server remains active, returning two `Owned` transport claims for one
+durable database authority. Ticket 04 remains claimed while a red real-socket
+regression adds a daemon-lifetime writer-authority lock outside the replaceable
+transport namespace, acquired before storage and retained for the daemon
+scope. That P1 is now repaired: runtime paths derive a hidden Unix socket in
+the qualified database directory or a distinct identity-keyed Windows named
+pipe; the daemon claims and drains it before transport election or storage and
+retains it through its Effect scope. The real-socket regression still proves a
+second `/tmp` transport bind after directory replacement, while the composed
+daemon claim returns `AlreadyRunning` under the retained authority listener.
+Focused runtime, ownership, build, and type checks pass 28 tests, but the
+strongest compiled public-path check found the first lock basename reaches 105
+bytes in the real macOS PackWalk directory, beyond the native Unix-socket path
+limit. JSON and text fail safely with one redacted error and leave neither
+socket behind. Ticket 04 remains claimed while a deterministic ordinary-macOS
+regression shortens the hidden identity-keyed basename within the portable
+bound and an explicit overlong-path contract fails before bind. That blocker is
+now repaired red-first: the unchanged identity token uses compact hidden Unix
+basename `.pw-v2-<24 hex>`, making the real path 87 bytes against the
+conservative 103-byte portable bound. Runtime derivation rejects a longer
+authority path before bind through the existing redacted startup failure. The
+targeted lock audit then found that `/System/Volumes/Data/Users/...` still
+reached about 107 bytes and regressed the required real macOS firmlink seam
+even though `/Users/...` fit. The existing native-alias regression is red. The
+lock now preserves the same full 96 authority bits as 16 base64url characters
+rather than 24 hexadecimal characters. The final hidden basename is
+`.pw-<16 base64url>`, bringing the installed `/Users/...` and
+`/System/Volumes/Data/Users/...` paths to 76 and 96 bytes. A short real
+firmlink fixture preserves lexically different paths, binds and drains the
+physical listener, and proves the alias claim is `AlreadyRunning`; the explicit
+overlong-path failure remains. Focused runtime, ownership, build, type, lint,
+and diff checks pass 30 tests, and the final targeted lock audit reports zero
+actionable findings. `npm run verify` passes 21 files and 113 tests plus
+typecheck, lint, and build, and the persisted-Codex check passes in 4.11
+seconds. Rebuilt JSON and text clients each exited zero with empty stderr and
+returned all 19 exact identities; JSON was a protocol-v2 `SessionsSnapshot`.
+Positively identified PID 35013 owned both the durable
+`.pw-Nc6NmXqu-1Q1-LtP` writer socket and v2 `/tmp` transport, then was stopped
+and released both. Pre-existing v1 PID 77857 remains running and untouched.
+Ticket 04 remains claimed for a wholly fresh generic review; product preflight
+remains paused.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 

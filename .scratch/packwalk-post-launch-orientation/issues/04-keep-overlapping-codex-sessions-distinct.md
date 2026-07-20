@@ -270,3 +270,69 @@ sessions overlap, share a repository, or have duplicate display labels.
   endpoint owner PID 98474 was stopped, and pre-existing v1 PID 77857 remains
   running and untouched. Ticket 04 remains claimed for a wholly fresh generic
   review; product preflight remains paused.
+- 2026-07-20: Fresh generic review pass 8 reports zero actionable
+  Specification findings and one P1 Standards blocker in daemon election. A
+  live Unix endpoint directory under `/tmp` can be renamed, recreated at the
+  original pathname, and bound again while the first server remains active;
+  both claims return `Owned` for one durable database authority. Ticket 04
+  remains claimed while a red real-socket regression separates daemon-lifetime
+  writer authority from the replaceable transport namespace. The durable
+  authority lock must be acquired before storage and retained for the daemon
+  scope; the transport bind remains a delivery check, not the sole-writer
+  primitive. Full verification and fresh generic review follow; product
+  preflight remains paused.
+- 2026-07-20: Pass 8's split-election P1 is repaired with the red real-socket
+  regression. Runtime paths now derive a second endpoint from the raw durable
+  database authority: a hidden socket in the qualified database directory on
+  Unix and a distinct authority-keyed named pipe on Windows. The daemon claims
+  and drains that listener before transport election or storage acquisition
+  and retains it through the Effect scope. Renaming and recreating `/tmp` still
+  proves that a second transport socket can bind, but the composed daemon claim
+  returns `AlreadyRunning` while the first authority listener is alive.
+  Focused runtime, ownership, build, and type checks pass 28 tests. Full
+  verification and a wholly fresh generic review remain pending; product
+  preflight stays paused.
+- 2026-07-20: The strongest compiled public-path check found a blocker before
+  checkpoint: the first Unix writer-lock name is 105 bytes in the real macOS
+  PackWalk data directory, beyond the native socket-path limit. JSON and text
+  both fail safely with one redacted error, and neither authority nor transport
+  socket is left behind. Ticket 04 remains claimed while a deterministic
+  ordinary-macOS path regression shortens the hidden identity-keyed basename
+  within the portable bound and an explicit overlong-path contract fails
+  before bind. Full verification, public-path rerun, and fresh review remain
+  required; product preflight stays paused.
+- 2026-07-20: The macOS socket-length blocker is repaired red-first. The
+  identity token is unchanged, but the hidden Unix lock basename is now the
+  compact `.pw-v2-<24 hex>`; the real PackWalk path is 87 bytes against the
+  conservative 103-byte portable bound. Runtime derivation rejects any
+  overlong authority path before socket bind with the existing redacted startup
+  failure. Both ordinary-path and overlong-path regressions pass. Full
+  verification, compiled public-path rerun, targeted lock audit, and wholly
+  fresh generic review remain pending; product preflight stays paused.
+- 2026-07-20: The targeted writer-lock audit found the first shortening still
+  regressed the required real macOS firmlink seam: the same data directory via
+  `/System/Volumes/Data/Users/...` reached about 107 bytes and failed runtime
+  derivation even though `/Users/...` fit. The existing real-alias test is red.
+  The lock keeps the same full 96 authority bits but now encodes them as 16
+  base64url characters rather than 24 hexadecimal characters, bringing both
+  native spellings within the conservative bound. The audit remains open until
+  both real aliases and composed ownership pass; no review gate is waived.
+- 2026-07-20: The final writer basename is `.pw-<16 base64url>`, preserving all
+  96 authority bits while bringing the installed `/Users/...` and
+  `/System/Volumes/Data/Users/...` paths to 76 and 96 bytes. A short native
+  firmlink fixture keeps its two lock spellings lexically distinct, binds and
+  drains the physical listener, and proves the alias claim is
+  `AlreadyRunning`; the explicit overlong-path failure remains. Focused
+  runtime, ownership, build, type, lint, and diff checks pass 30 tests. The
+  final targeted lock audit reports zero actionable findings. Full
+  verification, compiled public-path rerun, and wholly fresh generic review
+  remain pending; product preflight stays paused.
+- 2026-07-20: Full post-lock verification is green: `npm run verify` passes 21
+  files and 113 tests plus typecheck, lint, and build; the persisted-Codex check
+  passes in 4.11 seconds. Rebuilt JSON and text clients each exit zero with
+  empty stderr and contain all 19 exact identities; JSON is a protocol-v2
+  `SessionsSnapshot`. Positively identified PID 35013 owned both the durable
+  `.pw-Nc6NmXqu-1Q1-LtP` writer socket and the v2 `/tmp` transport, then was
+  stopped and released both; pre-existing v1 PID 77857 remains running and
+  untouched. Ticket 04 remains claimed for a wholly fresh generic review;
+  product preflight remains paused.

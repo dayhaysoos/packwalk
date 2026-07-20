@@ -17,6 +17,11 @@ export type SessionDaemonEndpointClaim =
       readonly _tag: "AlreadyRunning"
     }
 
+export interface SessionDaemonEndpoints {
+  readonly authorityEndpoint: string
+  readonly transportEndpoint: string
+}
+
 const endpointAcceptsConnections = (endpoint: string) =>
   Effect.callback<boolean>((resume) => {
     const socket = Net.createConnection({ path: endpoint })
@@ -65,4 +70,42 @@ export const claimSessionDaemonEndpoint = (
     }
 
     return yield* claim.failure
+  })
+
+/**
+ * Retains a database-authority listener for the daemon scope before claiming
+ * the replaceable client transport endpoint. The authority endpoint must be
+ * anchored to the durable database identity rather than its transport
+ * directory.
+ */
+export const claimSessionDaemon = ({
+  authorityEndpoint,
+  transportEndpoint,
+}: SessionDaemonEndpoints): Effect.Effect<
+  SessionDaemonEndpointClaim,
+  LocalIpcError,
+  Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const authorityClaim = yield* claimSessionDaemonEndpoint(
+      authorityEndpoint,
+    )
+    if (authorityClaim._tag === "AlreadyRunning") {
+      return authorityClaim
+    }
+
+    yield* authorityClaim.server
+      .run(() => Effect.void)
+      .pipe(
+        Effect.mapError(
+          () =>
+            new LocalIpcError({
+              code: "transport-unavailable",
+              message: "PackWalk could not retain daemon writer authority",
+            }),
+        ),
+        Effect.forkScoped,
+      )
+
+    return yield* claimSessionDaemonEndpoint(transportEndpoint)
   })

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto"
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -12,7 +14,10 @@ import { expect, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Effect, Result, Stream } from "effect"
 
-import { claimSessionDaemonEndpoint } from "../src/daemon/endpoint-ownership.js"
+import {
+  claimSessionDaemon,
+  claimSessionDaemonEndpoint,
+} from "../src/daemon/endpoint-ownership.js"
 import { runSessionEventServer } from "../src/adapters/local-session-ipc.js"
 
 const endpointIn = (directory: string): string =>
@@ -52,6 +57,51 @@ it.effect("elects exactly one daemon endpoint owner when starts compete", () =>
       "AlreadyRunning",
     )
   }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect.skipIf(process.platform === "win32")(
+  "retains database writer authority when the transport directory is replaced",
+  () =>
+    Effect.gen(function* () {
+      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-authority-test-"))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+      )
+      const authorityDirectory = join(testRoot, "durable")
+      const transportDirectory = join(testRoot, "transport")
+      const movedTransportDirectory = join(testRoot, "moved-transport")
+      mkdirSync(authorityDirectory)
+      mkdirSync(transportDirectory)
+      const authorityEndpoint = join(authorityDirectory, "writer.sock")
+      const transportEndpoint = join(transportDirectory, "daemon.sock")
+
+      const first = yield* claimSessionDaemon({
+        authorityEndpoint,
+        transportEndpoint,
+      })
+      expect(first._tag).toBe("Owned")
+      if (first._tag !== "Owned") {
+        return yield* Effect.die("Expected the first daemon to own authority")
+      }
+      yield* runSessionEventServer(first.server, Stream.never).pipe(
+        Effect.forkScoped,
+      )
+
+      renameSync(transportDirectory, movedTransportDirectory)
+      mkdirSync(transportDirectory)
+      expect(
+        (yield* claimSessionDaemonEndpoint(transportEndpoint))._tag,
+      ).toBe("Owned")
+
+      expect(
+        (
+          yield* claimSessionDaemon({
+            authorityEndpoint,
+            transportEndpoint,
+          })
+        )._tag,
+      ).toBe("AlreadyRunning")
+    }).pipe(Effect.provide(NodeServices.layer)),
 )
 
 it.effect.skipIf(process.platform === "win32")(

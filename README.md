@@ -113,6 +113,11 @@ reads Codex or PackWalk SQLite directly.
 Protocol-v2 overview clients use a versioned per-user local endpoint. A
 persistent protocol-v1 daemon is neither killed nor mistaken for the current
 overview service, and the v2 client never falls back to its singleton result.
+The client transport is not the database-writer lock: the daemon first retains
+a separate identity-keyed authority endpoint in the qualified PackWalk data
+directory on Unix or the named-pipe namespace on Windows. Replacing the Unix
+`/tmp` transport directory can make the service unavailable, but cannot elect a
+second writer for the same database authority.
 
 A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live

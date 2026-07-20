@@ -16,7 +16,7 @@ import {
   sessionDaemonLayerFromServer,
   Service as SessionDaemon,
 } from "./daemon/session-runtime.js"
-import { claimSessionDaemonEndpoint } from "./daemon/endpoint-ownership.js"
+import { claimSessionDaemon } from "./daemon/endpoint-ownership.js"
 
 const daemonProgram = Effect.scoped(
   Effect.gen(function* () {
@@ -24,7 +24,10 @@ const daemonProgram = Effect.scoped(
     yield* prepareRuntimeDirectories
     yield* verifyRuntimeAuthority(paths)
 
-    const endpointClaim = yield* claimSessionDaemonEndpoint(paths.ipcEndpoint)
+    const endpointClaim = yield* claimSessionDaemon({
+      authorityEndpoint: paths.daemonLockEndpoint,
+      transportEndpoint: paths.ipcEndpoint,
+    })
     yield* verifyRuntimeAuthority(paths)
     if (endpointClaim._tag === "AlreadyRunning") {
       return
