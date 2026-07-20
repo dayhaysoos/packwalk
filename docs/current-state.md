@@ -80,6 +80,21 @@ update difficult to notice. This is non-blocking product feedback for a
 separate readability slice after the multi-session shape exists; it does not
 reopen Ticket 01 polling.
 
+## Active delivery
+
+The accepted Ticket 01 slice is published on `main` at
+`e7c7808f4b0ba1b90803634a7f8613beffb96383`, and
+`integration/full-local-product` starts from that same commit.
+
+[Ticket 02](../.scratch/packwalk-post-launch-orientation/issues/02-attempt-one-post-launch-live-codex-event.md)
+is claimed on `agent/ticket-02-live-event-experiment` with the integration
+commit above as its fixed review point. This is one bounded experiment against
+the installed Codex release: success requires one trustworthy post-launch
+event correlated to the exact ordinary session that was already running.
+Weaker evidence is a complete negative result. Neither outcome by itself adds
+production `watched` status or direct control, and a negative result does not
+block the remaining polling tickets.
+
 ## Reproduce
 
 Use the exact versions pinned by the repository:
@@ -127,9 +142,9 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Publish the accepted Ticket 01 slice, then begin the bounded Ticket 02
-   live-event experiment from `integration/full-local-product`.
-2. Deliver the remaining polling tickets in dependency order, including a
+1. Complete the bounded Ticket 02 live-event experiment without changing the
+   post-launch lifecycle boundary.
+2. Deliver Tickets 03–10 in dependency order, including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check

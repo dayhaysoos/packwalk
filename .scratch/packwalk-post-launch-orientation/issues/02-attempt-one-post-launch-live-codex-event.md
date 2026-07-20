@@ -1,6 +1,6 @@
 # Attempt one post-launch live Codex event
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: 01
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -37,3 +37,11 @@ path is separately qualified.
       abstraction is created.
 - [ ] The report makes no portability claim beyond tested evidence and names
       what would require separate Windows, macOS, and Linux qualification.
+
+## Comments
+
+- 2026-07-20: Claimed on `agent/ticket-02-live-event-experiment` from fixed
+  integration point `e7c7808f4b0ba1b90803634a7f8613beffb96383`. The
+  experiment will qualify one post-launch event against the installed Codex
+  release without changing ordinary session lifecycle. A rigorous negative
+  result remains an accepted resolution and will not block Tickets 03–10.
