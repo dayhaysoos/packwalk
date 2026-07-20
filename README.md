@@ -61,7 +61,7 @@ npm ci
 
 Start at least one ordinary Codex TUI independently, before PackWalk, and
 complete one turn so its supported persisted record is current. From this
-repository, the single PackWalk command is:
+repository, start the continuously refreshing view with:
 
 ```sh
 npm run packwalk
@@ -80,6 +80,26 @@ with enough width refreshes the same six lines. Redirected output, a dumb
 terminal, or a terminal too narrow for the table appends each complete
 plain-text table instead. Press Ctrl-C to close the CLI; the daemon and Codex
 continue independently.
+
+For one current result suitable for scrollback, screen readers, or scripts,
+use either one-shot command:
+
+```sh
+npm run packwalk -- text
+npm run packwalk -- json
+```
+
+`text` emits the same complete six-line fields without terminal cursor
+controls. `json` emits the daemon's versioned Effect-Schema session event: an
+available result is a `SessionSnapshot` with a required `view`, while an
+unavailable source is a `SessionUnavailable` with a required redacted `code`
+and `message`. The tagged variants make unavailable session fields distinct
+from data that was merely omitted. Both commands query the daemon, write one
+document with the host platform's line ending, and exit. A snapshot or explicit
+unavailable result exits successfully; invalid arguments, connection or daemon
+failure, an empty stream, encoding failure, or output failure emits one
+redacted error to stderr and exits nonzero. Neither command reads Codex or
+PackWalk SQLite directly.
 
 A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live
@@ -127,6 +147,7 @@ turn in Codex and does not require special Codex launch options.
 - [Agent Watch lineage](docs/history/agent-watch-lineage.md)
 - [Active polling specification](.scratch/packwalk-post-launch-orientation/spec.md)
 - [First implementation ticket](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
+- [Text and JSON output ticket](.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
 
 ## Source availability
 

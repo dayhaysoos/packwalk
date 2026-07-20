@@ -106,7 +106,9 @@ export const formatSessionView = (view: SessionView): ReadonlyArray<string> =>
     observed: utcTimestamp(view.observedAtMs),
   })
 
-const formatEvent = (event: SessionEvent): ReadonlyArray<string> => {
+export const formatSessionEvent = (
+  event: SessionEvent,
+): ReadonlyArray<string> => {
   if (event._tag !== "SessionUnavailable") {
     return formatSessionView(event.view)
   }
@@ -128,5 +130,7 @@ export const runSessionClient = <E, R>(
   client: ClientPort,
 ): Effect.Effect<void, ClientOutputError | E, R> =>
   events.pipe(
-    Stream.runForEach((event) => client.writeFrame(formatEvent(event))),
+    Stream.runForEach((event) =>
+      client.writeFrame(formatSessionEvent(event)),
+    ),
   )

@@ -112,10 +112,15 @@ the ticket. No production code or `watched` state was added.
 
 [Ticket 03](../.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
 is claimed on `agent/ticket-03-text-json-output` from integration fixed point
-`6c4686dca30466b52db56785ef159348a28a4d1e`. It is adding deterministic
-one-shot plain-text and Effect-Schema encoded JSON views by consuming the same
-initial public daemon event as the refreshing CLI. Direct Codex or SQLite reads
-remain outside the client boundary.
+`6c4686dca30466b52db56785ef159348a28a4d1e`. Its implementation is green and
+awaiting independent review. `packwalk text` and `packwalk json` consume exactly
+the same initial public daemon event as the refreshing CLI, emit one
+platform-native-line-ended document, and exit without affecting the daemon.
+JSON uses the existing strict, versioned `SessionEvent` schema and preserves an
+explicit tagged unavailable result rather than optional session fields. Direct
+Codex or SQLite reads remain outside the client boundary. Deterministic
+verification passes 17 files and 75 tests; a compiled real-product smoke passed
+for both available one-shot forms and invalid-argument failure behavior.
 
 ## Reproduce
 

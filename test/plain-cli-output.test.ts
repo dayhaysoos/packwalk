@@ -1,7 +1,12 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, Ref, Sink, Stdio, Stream } from "effect"
 
-import { makePlainCliOutputWith } from "../src/client/plain-cli-output.js"
+import {
+  makeOneShotCliOutput,
+  makePlainCliOutputWith,
+  writeCliFailure,
+  writeCliUsage,
+} from "../src/client/plain-cli-output.js"
 import { runSessionClient } from "../src/client/session-client.js"
 import {
   ProjectIdentity,
@@ -44,6 +49,73 @@ const sessionEvents = () => {
     }),
   )
 }
+
+it.effect("writes a one-shot document exactly once without terminal behavior", () =>
+  Effect.gen(function* () {
+    const bytes = yield* Ref.make("")
+    const stdioLayer = Stdio.layerTest({
+      stdout: () =>
+        Sink.forEach((chunk: string | Uint8Array) =>
+          Ref.update(bytes, (current) => `${current}${String(chunk)}`),
+        ),
+    })
+    const output = yield* makeOneShotCliOutput.pipe(
+      Effect.provide(stdioLayer),
+    )
+
+    yield* output.writeDocument("first\r\nsecond\r\n")
+
+    expect(yield* Ref.get(bytes)).toBe("first\r\nsecond\r\n")
+  }),
+)
+
+it.effect("writes invalid-command usage only to stderr", () =>
+  Effect.gen(function* () {
+    const stdout = yield* Ref.make("")
+    const stderr = yield* Ref.make("")
+
+    yield* writeCliUsage("Usage: packwalk [text|json]", "\r\n").pipe(
+      Effect.provide(
+        Stdio.layerTest({
+          stdout: () =>
+            Sink.forEach((chunk: string | Uint8Array) =>
+              Ref.update(stdout, (current) => `${current}${String(chunk)}`),
+            ),
+          stderr: () =>
+            Sink.forEach((chunk: string | Uint8Array) =>
+              Ref.update(stderr, (current) => `${current}${String(chunk)}`),
+            ),
+        }),
+      ),
+    )
+
+    expect(yield* Ref.get(stdout)).toBe("")
+    expect(yield* Ref.get(stderr)).toBe(
+      "Usage: packwalk [text|json]\r\n",
+    )
+  }),
+)
+
+it.effect("writes a redacted failure with the selected platform separator", () =>
+  Effect.gen(function* () {
+    const stderr = yield* Ref.make("")
+
+    yield* writeCliFailure("\r\n").pipe(
+      Effect.provide(
+        Stdio.layerTest({
+          stderr: () =>
+            Sink.forEach((chunk: string | Uint8Array) =>
+              Ref.update(stderr, (current) => `${current}${String(chunk)}`),
+            ),
+        }),
+      ),
+    )
+
+    expect(yield* Ref.get(stderr)).toBe(
+      "PackWalk could not connect to its local session service. No Codex session was changed.\r\n",
+    )
+  }),
+)
 
 it.effect("appends plain frames without terminal controls on non-TTY output", () =>
   Effect.gen(function* () {

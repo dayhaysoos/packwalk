@@ -4,6 +4,7 @@ import {
   ClientOutputError,
   type ClientPort,
 } from "./session-client.js"
+import type { OneShotClientPort } from "./one-shot-session-client.js"
 
 export interface PlainCliOutputOptions {
   readonly isTerminal: boolean
@@ -100,9 +101,40 @@ export const makePlainCliOutput = makePlainCliOutputWith({
   columns: () => process.stdout.columns,
 })
 
-export const writeCliFailure = Effect.gen(function* () {
+export const makeOneShotCliOutput = Effect.gen(function* () {
   const stdio = yield* Stdio.Stdio
-  yield* Stream.make(
-    "PackWalk could not connect to its local session service. No Codex session was changed.\n",
-  ).pipe(Stream.run(stdio.stderr({ endOnDone: false })))
+
+  return {
+    writeDocument: Effect.fn("OneShotCliOutput.writeDocument")(
+      (document: string) =>
+        Stream.make(document).pipe(
+          Stream.run(stdio.stdout({ endOnDone: false })),
+          Effect.mapError(
+            () =>
+              new ClientOutputError({
+                message: "PackWalk could not write its command-line view",
+              }),
+          ),
+        ),
+    ),
+  } satisfies OneShotClientPort
 })
+
+export const writeCliUsage = (
+  usage: string,
+  lineSeparator: string,
+) =>
+  Effect.gen(function* () {
+    const stdio = yield* Stdio.Stdio
+    yield* Stream.make(`${usage}${lineSeparator}`).pipe(
+      Stream.run(stdio.stderr({ endOnDone: false })),
+    )
+  })
+
+export const writeCliFailure = (lineSeparator: string) =>
+  Effect.gen(function* () {
+    const stdio = yield* Stdio.Stdio
+    yield* Stream.make(
+      `PackWalk could not connect to its local session service. No Codex session was changed.${lineSeparator}`,
+    ).pipe(Stream.run(stdio.stderr({ endOnDone: false })))
+  })
