@@ -9,19 +9,27 @@ import {
 } from "node:fs"
 import { backup, DatabaseSync } from "node:sqlite"
 
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 
 import {
   type NonEmptySessionFacts,
   Service as SessionSource,
   SessionSourceError,
 } from "../application/session-source.js"
-import { Service, SessionStorageError } from "../application/session-storage.js"
+import {
+  Service,
+  SessionStorageError,
+  type SessionHistoryPage as StoredSessionHistoryPage,
+  type SessionObservationCommit,
+} from "../application/session-storage.js"
 import {
   CodexPersistedFact,
   DateTimestampMs,
   Identity,
   ProjectIdentity,
+  SessionEvidenceFact,
+  SessionEvidenceOrigin,
+  SessionHistoryCursor,
   SessionIdentity,
   SessionProvenance,
   SessionRetentionReason,
@@ -36,6 +44,7 @@ import {
 } from "./project-identity.js"
 
 const MaximumSafeInteger = Number.MAX_SAFE_INTEGER
+const HistoryPageSize = 32
 
 const NonNegativeSafeInteger = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(0),
@@ -115,6 +124,42 @@ const StorageStateRow = Schema.Struct({
   last_commit_sequence: NonNegativeSafeInteger,
 })
 
+const SessionEvidenceRow = Schema.Struct({
+  commit_sequence: PositiveSafeInteger,
+  session_id: SessionIdentity,
+  fact_version: Schema.Literal(1),
+  origin_tag: Schema.Literals(["Committed", "MigratedBaseline"]),
+  recorded_at_ms: Schema.NullOr(DateTimestampMs),
+  view_protocol_version: Schema.Literal(2),
+  project_identity: ProjectIdentity,
+  activity: Schema.Literal("persisted Codex activity"),
+  evidence_source: Schema.Literal("codex-sqlite-thread-index"),
+  state_tag: Schema.Literals(["Discovered", "Polled"]),
+  freshness: Schema.Literals(["fresh", "stale"]),
+  provenance_tag: Schema.Literals(["Observed", "Retained"]),
+  retention_reason: Schema.NullOr(SessionRetentionReason),
+  source_updated_at_ms: DateTimestampMs,
+  observed_at_ms: DateTimestampMs,
+}).check(
+  Schema.makeFilter((row) => {
+    const validOrigin =
+      (row.origin_tag === "Committed" && row.recorded_at_ms !== null) ||
+      (row.origin_tag === "MigratedBaseline" && row.recorded_at_ms === null)
+    const validEvidence =
+      (row.freshness === "fresh" &&
+        row.provenance_tag === "Observed" &&
+        row.retention_reason === null) ||
+      (row.freshness === "stale" &&
+        row.provenance_tag === "Retained" &&
+        row.retention_reason !== null)
+    return validOrigin && validEvidence
+      ? undefined
+      : "stored history origin and evidence must be consistent"
+  }),
+)
+
+type SessionEvidenceRow = typeof SessionEvidenceRow.Type
+
 const TableNameRow = Schema.Struct({ name: Schema.NonEmptyString })
 const MigrationRow = Schema.Struct({
   version: PositiveSafeInteger,
@@ -125,6 +170,8 @@ const storageErrorMessages = {
   "SessionStorage.open": "PackWalk could not open its session storage",
   "SessionStorage.decodeRow": "PackWalk could not decode its stored session view",
   "SessionStorage.load": "PackWalk could not read its stored session view",
+  "SessionStorage.loadHistoryPage":
+    "PackWalk could not read its retained session history",
   "SessionStorage.commit": "PackWalk could not commit its current session view",
 } as const
 
@@ -542,6 +589,122 @@ const createVersion3SchemaSql = `
   );
 `
 
+const createVersion4HistoryTableSql = `
+  CREATE TABLE session_evidence_history (
+    commit_sequence INTEGER PRIMARY KEY CHECK (
+      commit_sequence >= 1 AND commit_sequence <= 9007199254740991
+    ),
+    session_id TEXT COLLATE BINARY NOT NULL CHECK (
+      length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    fact_version INTEGER NOT NULL CHECK (fact_version = 1),
+    origin_tag TEXT NOT NULL CHECK (
+      origin_tag IN ('Committed', 'MigratedBaseline')
+    ),
+    recorded_at_ms INTEGER CHECK (
+      recorded_at_ms IS NULL OR (
+        recorded_at_ms >= 0 AND
+        recorded_at_ms <= 8640000000000000
+      )
+    ),
+    view_protocol_version INTEGER NOT NULL CHECK (view_protocol_version = 2),
+    project_identity TEXT NOT NULL CHECK (
+      length(CAST(project_identity AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
+    evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
+    state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
+    freshness TEXT NOT NULL CHECK (freshness IN ('fresh', 'stale')),
+    provenance_tag TEXT NOT NULL CHECK (
+      provenance_tag IN ('Observed', 'Retained')
+    ),
+    retention_reason TEXT CHECK (
+      retention_reason IS NULL OR
+      retention_reason IN ('source-unavailable', 'source-unsupported')
+    ),
+    source_updated_at_ms INTEGER NOT NULL CHECK (
+      source_updated_at_ms >= 0 AND
+      source_updated_at_ms <= 8640000000000000
+    ),
+    observed_at_ms INTEGER NOT NULL CHECK (
+      observed_at_ms >= 0 AND
+      observed_at_ms <= 8640000000000000
+    ),
+    FOREIGN KEY (session_id) REFERENCES current_sessions(session_id),
+    CHECK (
+      (
+        origin_tag = 'Committed' AND
+        recorded_at_ms IS NOT NULL
+      ) OR (
+        origin_tag = 'MigratedBaseline' AND
+        recorded_at_ms IS NULL
+      )
+    ),
+    CHECK (
+      (
+        freshness = 'fresh' AND
+        provenance_tag = 'Observed' AND
+        retention_reason IS NULL
+      ) OR (
+        freshness = 'stale' AND
+        provenance_tag = 'Retained' AND
+        retention_reason IS NOT NULL
+      )
+    )
+  );
+
+  CREATE INDEX session_evidence_history_exact_order
+  ON session_evidence_history (session_id COLLATE BINARY, commit_sequence);
+`
+
+const createVersion4SchemaSql = `
+  ${createVersion3SchemaSql}
+  ${createVersion4HistoryTableSql}
+`
+
+const insertMigratedHistoryBaselinesSql = `
+  INSERT INTO session_evidence_history (
+    commit_sequence,
+    session_id,
+    fact_version,
+    origin_tag,
+    recorded_at_ms,
+    view_protocol_version,
+    project_identity,
+    activity,
+    evidence_source,
+    state_tag,
+    freshness,
+    provenance_tag,
+    retention_reason,
+    source_updated_at_ms,
+    observed_at_ms
+  )
+  SELECT
+    commit_sequence,
+    session_id,
+    1,
+    'MigratedBaseline',
+    NULL,
+    protocol_version,
+    project_identity,
+    activity,
+    evidence_source,
+    state_tag,
+    freshness,
+    provenance_tag,
+    retention_reason,
+    source_updated_at_ms,
+    observed_at_ms
+  FROM current_sessions
+  ORDER BY commit_sequence;
+`
+
+const migrateVersion3HistorySql = `
+  ${createVersion4HistoryTableSql}
+  ${insertMigratedHistoryBaselinesSql}
+`
+
 const migrateVersion2OverviewSql = `
   ALTER TABLE current_sessions RENAME TO current_sessions_v2;
 
@@ -593,9 +756,17 @@ const version3Migration = {
     .digest("hex"),
 } as const
 
+const version4Migration = {
+  version: 4,
+  checksum: createHash("sha256")
+    .update(migrateVersion3HistorySql)
+    .digest("hex"),
+} as const
+
 const storageMigrations = [
   version2Migration,
   version3Migration,
+  version4Migration,
 ] as const
 
 const inspectStorageSchema = Effect.fn("SessionStorage.inspectSchema")(
@@ -629,7 +800,16 @@ const inspectStorageSchema = Effect.fn("SessionStorage.inspectSchema")(
       names[1] === "schema_migrations" &&
       names[2] === "storage_state"
     ) {
-      return "current"
+      return "current-without-history"
+    }
+    if (
+      names.length === 4 &&
+      names[0] === "current_sessions" &&
+      names[1] === "schema_migrations" &&
+      names[2] === "session_evidence_history" &&
+      names[3] === "storage_state"
+    ) {
+      return "current-with-history"
     }
     return yield* storageError("SessionStorage.open")
   },
@@ -676,7 +856,7 @@ const recordCurrentMigrations = (database: DatabaseSync): void => {
 
 const initializeFreshSchema = (database: DatabaseSync) =>
   runSchemaTransaction(database, () => {
-    database.exec(createVersion3SchemaSql)
+    database.exec(createVersion4SchemaSql)
     database
       .prepare(`
         INSERT INTO storage_state (singleton, last_commit_sequence)
@@ -765,9 +945,21 @@ const inspectCurrentMigration = Effect.fn("SessionStorage.verifyMigration")(
       }
     }
 
-    return decoded.length === 1 ? 2 as const : 3 as const
+    return decoded.length === 1
+      ? 2 as const
+      : decoded.length === 2
+        ? 3 as const
+        : 4 as const
   },
 )
+
+const verifyCurrentSchemaShape = (
+  schema: "current-without-history" | "current-with-history",
+  version: 2 | 3 | 4,
+): Effect.Effect<void, SessionStorageError> =>
+  (schema === "current-with-history") === (version === 4)
+    ? Effect.void
+    : Effect.fail(storageError("SessionStorage.open"))
 
 interface CurrentStorageSnapshot {
   readonly rows: ReadonlyArray<SessionRow>
@@ -793,7 +985,7 @@ const readCurrentStorageSnapshot = Effect.fn(
   "SessionStorage.readCurrentSnapshot",
 )(function* (
   database: DatabaseSync,
-  version: 2 | 3,
+  version: 2 | 3 | 4,
 ) {
   const stored = yield* Effect.try({
     try: () => ({
@@ -864,6 +1056,21 @@ const migrateVersion2Overview = (
     })
   })
 
+const migrateVersion3History = (
+  database: DatabaseSync,
+  path: string,
+) =>
+  Effect.gen(function* () {
+    yield* readCurrentStorageSnapshot(database, 3)
+    yield* completeSqliteBackup(() =>
+      backup(database, `${path}.pre-migration-v4.sqlite`),
+    )
+    yield* runSchemaTransaction(database, () => {
+      database.exec(migrateVersion3HistorySql)
+      recordMigration(database, version4Migration)
+    })
+  })
+
 const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
   function* (
     database: DatabaseSync,
@@ -878,20 +1085,54 @@ const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
       yield* validateLegacySingleton(database)
       yield* migrateLegacySingleton(database, path)
       yield* migrateVersion2Overview(database, path, false)
+      yield* migrateVersion3History(database, path)
       return
     }
     const version = yield* inspectCurrentMigration(database)
+    yield* verifyCurrentSchemaShape(schema, version)
     if (version === 2) {
       yield* migrateVersion2Overview(database, path)
+      yield* migrateVersion3History(database, path)
+      return
+    }
+    if (version === 3) {
+      yield* migrateVersion3History(database, path)
     }
   },
 )
 
 interface ImportedStorageSnapshot {
-  readonly schema: "fresh" | "legacy-singleton" | "current"
+  readonly schema:
+    | "fresh"
+    | "legacy-singleton"
+    | "current-without-history"
+    | "current-with-history"
   readonly rows: ReadonlyArray<SessionRow>
+  readonly historyRows: ReadonlyArray<SessionEvidenceRow>
   readonly lastCommitSequence: number
 }
+
+const readCurrentHistoryRows = Effect.fn(
+  "SessionStorage.readCurrentHistory",
+)(function* (database: DatabaseSync) {
+  const rows = yield* Effect.try({
+    try: () =>
+      database
+        .prepare(`
+          SELECT *
+          FROM session_evidence_history
+          ORDER BY commit_sequence
+        `)
+        .all(),
+    catch: () => storageError("SessionStorage.open"),
+  })
+  return yield* Schema.decodeUnknownEffect(
+    Schema.Array(SessionEvidenceRow),
+    { onExcessProperty: "error" },
+  )(rows).pipe(
+    Effect.mapError(() => storageError("SessionStorage.open")),
+  )
+})
 
 const readImportSnapshot = (path: string) =>
   Effect.acquireUseRelease(
@@ -903,6 +1144,7 @@ const readImportSnapshot = (path: string) =>
           return {
             schema,
             rows: [],
+            historyRows: [],
             lastCommitSequence: 0,
           } satisfies ImportedStorageSnapshot
         }
@@ -912,15 +1154,21 @@ const readImportSnapshot = (path: string) =>
           return {
             schema,
             rows,
+            historyRows: [],
             lastCommitSequence: rows[0]?.commit_sequence ?? 0,
           } satisfies ImportedStorageSnapshot
         }
 
         const version = yield* inspectCurrentMigration(database)
+        yield* verifyCurrentSchemaShape(schema, version)
         const stored = yield* readCurrentStorageSnapshot(database, version)
         return {
           schema,
           rows: stored.rows,
+          historyRows:
+            version === 4
+              ? yield* readCurrentHistoryRows(database)
+              : [],
           lastCommitSequence: stored.lastCommitSequence,
         } satisfies ImportedStorageSnapshot
       }),
@@ -932,7 +1180,7 @@ const initializeFreshSchemaFromSnapshot = (
   snapshot: ImportedStorageSnapshot,
 ) =>
   runSchemaTransaction(database, () => {
-    database.exec(createVersion3SchemaSql)
+    database.exec(createVersion4SchemaSql)
     const insert = database.prepare(`
       INSERT INTO current_sessions (
         protocol_version,
@@ -964,6 +1212,48 @@ const initializeFreshSchemaFromSnapshot = (
         row.observed_at_ms,
         row.commit_sequence,
       )
+    }
+    if (snapshot.historyRows.length === 0) {
+      database.exec(insertMigratedHistoryBaselinesSql)
+    } else {
+      const insertHistory = database.prepare(`
+        INSERT INTO session_evidence_history (
+          commit_sequence,
+          session_id,
+          fact_version,
+          origin_tag,
+          recorded_at_ms,
+          view_protocol_version,
+          project_identity,
+          activity,
+          evidence_source,
+          state_tag,
+          freshness,
+          provenance_tag,
+          retention_reason,
+          source_updated_at_ms,
+          observed_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      for (const row of snapshot.historyRows) {
+        insertHistory.run(
+          row.commit_sequence,
+          row.session_id,
+          row.fact_version,
+          row.origin_tag,
+          row.recorded_at_ms,
+          row.view_protocol_version,
+          row.project_identity,
+          row.activity,
+          row.evidence_source,
+          row.state_tag,
+          row.freshness,
+          row.provenance_tag,
+          row.retention_reason,
+          row.source_updated_at_ms,
+          row.observed_at_ms,
+        )
+      }
     }
     database
       .prepare(`
@@ -1144,47 +1434,113 @@ const openDatabase = (path: string, legacyPath?: string) =>
     )
   })
 
+const sessionViewFromRow = (decoded: SessionRow) =>
+  SessionView.make({
+    protocolVersion: decoded.protocol_version,
+    sessionId: decoded.session_id,
+    projectIdentity: decoded.project_identity,
+    activity: decoded.activity,
+    evidenceSource: decoded.evidence_source,
+    state:
+      decoded.state_tag === "Discovered"
+        ? SessionState.cases.Discovered.make({})
+        : SessionState.cases.Polled.make({}),
+    freshness: decoded.freshness,
+    provenance:
+      decoded.provenance_tag === "Observed"
+        ? SessionProvenance.cases.Observed.make({})
+        : SessionProvenance.cases.Retained.make({
+            reason: decoded.retention_reason,
+          }),
+    sourceUpdatedAtMs: decoded.source_updated_at_ms,
+    observedAtMs: decoded.observed_at_ms,
+    commitSequence: decoded.commit_sequence,
+  })
+
 const decodeRow = (row: unknown) =>
   Schema.decodeUnknownEffect(SessionRow, { onExcessProperty: "error" })(row).pipe(
     Effect.mapError(() => storageError("SessionStorage.decodeRow")),
-    Effect.map((decoded) =>
-      SessionView.make({
-        protocolVersion: decoded.protocol_version,
-        sessionId: decoded.session_id,
-        projectIdentity: decoded.project_identity,
-        activity: decoded.activity,
-        evidenceSource: decoded.evidence_source,
-        state:
-          decoded.state_tag === "Discovered"
-            ? SessionState.cases.Discovered.make({})
-            : SessionState.cases.Polled.make({}),
-        freshness: decoded.freshness,
-        provenance:
-          decoded.provenance_tag === "Observed"
-            ? SessionProvenance.cases.Observed.make({})
-            : SessionProvenance.cases.Retained.make({
-                reason: decoded.retention_reason,
-              }),
-        sourceUpdatedAtMs: decoded.source_updated_at_ms,
-        observedAtMs: decoded.observed_at_ms,
-        commitSequence: decoded.commit_sequence,
-      }),
-    ),
+    Effect.map(sessionViewFromRow),
   )
+
+const sessionEvidenceFactFromRow = (
+  decoded: SessionEvidenceRow,
+) =>
+  SessionEvidenceFact.make({
+    factVersion: decoded.fact_version,
+    origin:
+      decoded.recorded_at_ms !== null
+        ? SessionEvidenceOrigin.cases.Committed.make({
+            recordedAtMs: decoded.recorded_at_ms,
+          })
+        : SessionEvidenceOrigin.cases.MigratedBaseline.make({}),
+    view: SessionView.make({
+      protocolVersion: decoded.view_protocol_version,
+      sessionId: decoded.session_id,
+      projectIdentity: decoded.project_identity,
+      activity: decoded.activity,
+      evidenceSource: decoded.evidence_source,
+      state:
+        decoded.state_tag === "Discovered"
+          ? SessionState.cases.Discovered.make({})
+          : SessionState.cases.Polled.make({}),
+      freshness: decoded.freshness,
+      provenance:
+        decoded.retention_reason === null
+          ? SessionProvenance.cases.Observed.make({})
+          : SessionProvenance.cases.Retained.make({
+              reason: decoded.retention_reason,
+            }),
+      sourceUpdatedAtMs: decoded.source_updated_at_ms,
+      observedAtMs: decoded.observed_at_ms,
+      commitSequence: decoded.commit_sequence,
+    }),
+  })
+
+const decodeHistoryRow = (row: unknown) =>
+  Schema.decodeUnknownEffect(SessionEvidenceRow, {
+    onExcessProperty: "error",
+  })(row).pipe(
+    Effect.mapError(() => storageError("SessionStorage.decodeRow")),
+    Effect.map(sessionEvidenceFactFromRow),
+  )
+
+const sameSessionView = (left: SessionView, right: SessionView): boolean =>
+  left.protocolVersion === right.protocolVersion &&
+  left.sessionId === right.sessionId &&
+  left.projectIdentity === right.projectIdentity &&
+  left.activity === right.activity &&
+  left.evidenceSource === right.evidenceSource &&
+  left.state._tag === right.state._tag &&
+  left.freshness === right.freshness &&
+  left.provenance._tag === right.provenance._tag &&
+  (left.provenance._tag === "Observed" ||
+    (right.provenance._tag === "Retained" &&
+      left.provenance.reason === right.provenance.reason)) &&
+  left.sourceUpdatedAtMs === right.sourceUpdatedAtMs &&
+  left.observedAtMs === right.observedAtMs &&
+  left.commitSequence === right.commitSequence
+
+const SessionObservationCommitInput = Schema.Struct({
+  recordedAtMs: DateTimestampMs,
+  changedViews: Schema.NonEmptyArray(SessionView),
+})
 
 const decodeCommitInput = Effect.fn("SessionStorage.decodeCommitInput")(
   function* (
     expectedPreviousCommitSequence: number,
-    changedViews: ReadonlyArray<SessionView>,
+    observation: SessionObservationCommit,
   ) {
     const expected = yield* Schema.decodeUnknownEffect(NonNegativeSafeInteger)(
       expectedPreviousCommitSequence,
     ).pipe(Effect.mapError(() => storageError("SessionStorage.commit")))
-    const views = yield* Schema.decodeUnknownEffect(Schema.Array(SessionView), {
-      onExcessProperty: "error",
-    })(changedViews).pipe(
+    const decodedObservation = yield* Schema.decodeUnknownEffect(
+      SessionObservationCommitInput,
+      { onExcessProperty: "error" },
+    )(observation).pipe(
       Effect.mapError(() => storageError("SessionStorage.commit")),
     )
+    const views = decodedObservation.changedViews
 
     const identities = new Set<string>()
     for (const view of views) {
@@ -1207,7 +1563,12 @@ const decodeCommitInput = Effect.fn("SessionStorage.decodeCommitInput")(
       Effect.mapError(() => storageError("SessionStorage.commit")),
     )
 
-    return { expected, next, views: ordered }
+    return {
+      expected,
+      next,
+      recordedAtMs: decodedObservation.recordedAtMs,
+      views: ordered,
+    }
   },
 )
 
@@ -1272,13 +1633,206 @@ export const layer = (path: string, legacyPath?: string) =>
           }
         })
 
+        const loadHistoryPage = Effect.fn(
+          "SessionStorage.loadHistoryPage",
+        )(function* (
+          sessionId: SessionIdentity,
+          cursor: SessionHistoryCursor | null,
+        ) {
+          const exactSessionId = yield* Schema.decodeUnknownEffect(
+            SessionIdentity,
+          )(sessionId).pipe(
+            Effect.mapError(() =>
+              storageError("SessionStorage.loadHistoryPage"),
+            ),
+          )
+          const exactSessionKey = String(exactSessionId)
+          const decodedCursor = cursor === null
+            ? null
+            : yield* Schema.decodeUnknownEffect(SessionHistoryCursor, {
+                onExcessProperty: "error",
+              })(cursor).pipe(
+                Effect.mapError(() =>
+                  storageError("SessionStorage.loadHistoryPage"),
+                ),
+              )
+
+          const result = yield* Effect.try({
+            try: () => {
+              database.exec("BEGIN")
+              try {
+                const currentRow = decodedCursor === null
+                  ? database
+                      .prepare(`
+                        SELECT *
+                        FROM current_sessions
+                        WHERE session_id = ? COLLATE BINARY
+                      `)
+                      .get(exactSessionKey)
+                  : undefined
+                if (decodedCursor === null && currentRow === undefined) {
+                  database.exec("COMMIT")
+                  return { _tag: "NotFound" as const }
+                }
+
+                const currentCommitSequence = currentRow?.commit_sequence
+                if (
+                  decodedCursor === null &&
+                  typeof currentCommitSequence !== "number"
+                ) {
+                  throw new Error("Current session history is incomplete")
+                }
+                const throughCommitSequence = decodedCursor === null
+                  ? currentCommitSequence
+                  : decodedCursor.throughCommitSequence
+                if (typeof throughCommitSequence !== "number") {
+                  throw new Error("Current session history is incomplete")
+                }
+                const afterCommitSequence = decodedCursor?.afterCommitSequence ?? 0
+                const explainedRow = database
+                  .prepare(`
+                    SELECT *
+                    FROM session_evidence_history
+                    WHERE
+                      session_id = ? COLLATE BINARY AND
+                      commit_sequence = ?
+                  `)
+                  .get(exactSessionKey, throughCommitSequence)
+                const rows = database
+                  .prepare(`
+                    SELECT *
+                    FROM session_evidence_history
+                    WHERE
+                      session_id = ? COLLATE BINARY AND
+                      commit_sequence > ? AND
+                      commit_sequence <= ?
+                    ORDER BY commit_sequence
+                    LIMIT ?
+                  `)
+                  .all(
+                    exactSessionKey,
+                    afterCommitSequence,
+                    throughCommitSequence,
+                    HistoryPageSize + 1,
+                  )
+                const baseline = database
+                  .prepare(`
+                    SELECT COUNT(*) AS baseline_count
+                    FROM session_evidence_history
+                    WHERE
+                      session_id = ? COLLATE BINARY AND
+                      commit_sequence <= ? AND
+                      origin_tag = 'MigratedBaseline'
+                  `)
+                  .get(exactSessionKey, throughCommitSequence)
+                database.exec("COMMIT")
+                return {
+                  _tag: "Found" as const,
+                  afterCommitSequence,
+                  currentRow,
+                  explainedRow,
+                  rows,
+                  baseline,
+                  throughCommitSequence,
+                }
+              } catch (error) {
+                try {
+                  database.exec("ROLLBACK")
+                } catch {
+                  // The original history read failure is authoritative.
+                }
+                throw error
+              }
+            },
+            catch: () => storageError("SessionStorage.loadHistoryPage"),
+          })
+          if (result._tag === "NotFound") {
+            return Option.none<StoredSessionHistoryPage>()
+          }
+
+          const throughCommitSequence = yield* Schema.decodeUnknownEffect(
+            PositiveSafeInteger,
+          )(result.throughCommitSequence).pipe(
+            Effect.mapError(() =>
+              storageError("SessionStorage.loadHistoryPage"),
+            ),
+          )
+          const baseline = yield* Schema.decodeUnknownEffect(
+            Schema.Struct({ baseline_count: NonNegativeSafeInteger }),
+            { onExcessProperty: "error" },
+          )(result.baseline).pipe(
+            Effect.mapError(() =>
+              storageError("SessionStorage.loadHistoryPage"),
+            ),
+          )
+          if (baseline.baseline_count > 1) {
+            return yield* storageError("SessionStorage.loadHistoryPage")
+          }
+          const explainedFact = yield* decodeHistoryRow(
+            result.explainedRow,
+          ).pipe(
+            Effect.mapError(() =>
+              storageError("SessionStorage.loadHistoryPage"),
+            ),
+          )
+          if (result.currentRow !== undefined) {
+            const currentView = yield* decodeRow(result.currentRow).pipe(
+              Effect.mapError(() =>
+                storageError("SessionStorage.loadHistoryPage"),
+              ),
+            )
+            if (!sameSessionView(currentView, explainedFact.view)) {
+              return yield* storageError("SessionStorage.loadHistoryPage")
+            }
+          }
+
+          const pageRows = result.rows.slice(0, HistoryPageSize)
+          const decodedFacts = yield* Effect.forEach(pageRows, (row) =>
+            decodeHistoryRow(row).pipe(
+              Effect.mapError(() =>
+                storageError("SessionStorage.loadHistoryPage"),
+              ),
+            ),
+          )
+          const firstFact = decodedFacts[0]
+          const lastFact = decodedFacts.at(-1)
+          if (firstFact === undefined || lastFact === undefined) {
+            return yield* storageError("SessionStorage.loadHistoryPage")
+          }
+          const hasNextPage = result.rows.length > HistoryPageSize
+          if (
+            !hasNextPage &&
+            lastFact.view.commitSequence !== throughCommitSequence
+          ) {
+            return yield* storageError("SessionStorage.loadHistoryPage")
+          }
+
+          const facts: readonly [
+            SessionEvidenceFact,
+            ...SessionEvidenceFact[],
+          ] = [firstFact, ...decodedFacts.slice(1)]
+          const page: StoredSessionHistoryPage = {
+            explainedView: explainedFact.view,
+            historyCoverage:
+              baseline.baseline_count === 0
+                ? "complete" as const
+                : "prior-history-unavailable" as const,
+            facts,
+            throughCommitSequence,
+            nextAfterCommitSequence: hasNextPage
+              ? lastFact.view.commitSequence
+              : null,
+          }
+          return Option.some(page)
+        })
+
         const commit = Effect.fn("SessionStorage.commit")(function* (
           expectedPreviousCommitSequence: number,
-          changedViews: ReadonlyArray<SessionView>,
+          observation: SessionObservationCommit,
         ) {
           const input = yield* decodeCommitInput(
             expectedPreviousCommitSequence,
-            changedViews,
+            observation,
           )
 
           yield* Effect.try({
@@ -1324,6 +1878,25 @@ export const layer = (path: string, legacyPath?: string) =>
                     observed_at_ms = excluded.observed_at_ms,
                     commit_sequence = excluded.commit_sequence
                 `)
+                const insertHistory = database.prepare(`
+                  INSERT INTO session_evidence_history (
+                    commit_sequence,
+                    session_id,
+                    fact_version,
+                    origin_tag,
+                    recorded_at_ms,
+                    view_protocol_version,
+                    project_identity,
+                    activity,
+                    evidence_source,
+                    state_tag,
+                    freshness,
+                    provenance_tag,
+                    retention_reason,
+                    source_updated_at_ms,
+                    observed_at_ms
+                  ) VALUES (?, ?, ?, 'Committed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `)
                 for (const view of input.views) {
                   upsert.run(
                     view.sessionId,
@@ -1341,6 +1914,24 @@ export const layer = (path: string, legacyPath?: string) =>
                     view.observedAtMs,
                     view.commitSequence,
                   )
+                  insertHistory.run(
+                    view.commitSequence,
+                    view.sessionId,
+                    1,
+                    input.recordedAtMs,
+                    view.protocolVersion,
+                    view.projectIdentity,
+                    view.activity,
+                    view.evidenceSource,
+                    view.state._tag,
+                    view.freshness,
+                    view.provenance._tag,
+                    view.provenance._tag === "Retained"
+                      ? view.provenance.reason
+                      : null,
+                    view.sourceUpdatedAtMs,
+                    view.observedAtMs,
+                  )
                 }
                 database.exec("COMMIT")
               } catch (error) {
@@ -1356,7 +1947,7 @@ export const layer = (path: string, legacyPath?: string) =>
           })
         })
 
-        return Service.of({ load, commit })
+        return Service.of({ load, loadHistoryPage, commit })
       }),
     ),
   )

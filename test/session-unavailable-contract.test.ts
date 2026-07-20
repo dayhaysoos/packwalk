@@ -44,7 +44,7 @@ it.effect("round-trips every valid unavailable code and message pair", () =>
     for (const pair of validUnavailablePairs) {
       const input = {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         ...pair,
       } as const
       const decoded = yield* decode(input)
@@ -59,37 +59,37 @@ it.effect("rejects every mismatched unavailable code and message pair", () =>
     const mismatchedPairs = [
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-unavailable",
         message: commitFailureMessage,
       },
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-incompatible",
         message: commitFailureMessage,
       },
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "storage-unavailable",
         message: readFailureMessage,
       },
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-ambiguous",
         message: readFailureMessage,
       },
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-unavailable",
         message: ambiguousFailureMessage,
       },
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "overview-unavailable",
         message: readFailureMessage,
       },

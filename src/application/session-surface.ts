@@ -25,9 +25,15 @@ import {
   encodeSessionProtocolEvent,
   matchTransition,
   sameSessionIdentity,
+  SessionHistoryPage,
+  SessionHistoryUnavailable,
+  sessionHistoryOmittedContent,
+  sessionHistoryUnsupportedFacts,
   SessionProtocolEvent,
   SessionTransitionTrigger,
   type CodexPersistedFact,
+  type SessionHistoryCursor,
+  type SessionHistoryProtocolResponse,
   type SessionIdentity,
   type SessionRetentionReason,
   type SessionView,
@@ -36,6 +42,10 @@ import {
 
 export interface Interface {
   readonly events: Stream.Stream<SessionProtocolEvent>
+  readonly inspectHistoryPage: (
+    sessionId: SessionIdentity,
+    cursor: SessionHistoryCursor | null,
+  ) => Effect.Effect<SessionHistoryProtocolResponse>
   readonly refresh: () => Effect.Effect<void>
   readonly runPolling: Effect.Effect<never>
 }
@@ -56,6 +66,7 @@ interface ObservationDecision {
   readonly changedViews: ReadonlyArray<SessionView>
   readonly changedSessionIds: ReadonlyArray<SessionIdentity>
   readonly lastCommitSequence: number
+  readonly recordedAtMs: number
 }
 
 interface FinalizedObservation {
@@ -86,26 +97,26 @@ const sourceUnavailableEvent = (
 ): SessionProtocolEvent =>
   code === "source-ambiguous"
     ? SessionProtocolEvent.cases.SessionUnavailable.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         code,
         message: "PackWalk found ambiguous Codex persisted evidence",
       })
     : SessionProtocolEvent.cases.SessionUnavailable.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         code,
         message: "PackWalk could not read supported Codex persisted evidence",
       })
 
 const storageUnavailableEvent = (): SessionProtocolEvent =>
   SessionProtocolEvent.cases.SessionUnavailable.make({
-    protocolVersion: 3,
+    protocolVersion: 4,
     code: "storage-unavailable",
     message: "PackWalk could not commit its current session view",
   })
 
 const overviewUnavailableEvent = (): SessionProtocolEvent =>
   SessionProtocolEvent.cases.SessionUnavailable.make({
-    protocolVersion: 3,
+    protocolVersion: 4,
     code: "overview-unavailable",
     message: "PackWalk could not publish its current session overview",
   })
@@ -128,7 +139,7 @@ const asCurrentSnapshot = (
   switch (event._tag) {
     case "SessionsUpdated":
       return SessionProtocolEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: event.views,
       })
     case "SessionsSnapshot":
@@ -235,7 +246,7 @@ const recordSessionTransition = (
   })
 
 const completeObservation = Effect.fn("SessionSurface.completeObservation")(
-  function* (accumulator: ObservationAccumulator) {
+  function* (accumulator: ObservationAccumulator, recordedAtMs: number) {
     const orderedViews = Array.from(accumulator.nextByIdentity.values()).sort(
       exactIdentityOrder,
     )
@@ -252,6 +263,7 @@ const completeObservation = Effect.fn("SessionSurface.completeObservation")(
       changedViews: accumulator.changedViews,
       changedSessionIds: accumulator.changedSessionIds,
       lastCommitSequence: accumulator.lastCommitSequence,
+      recordedAtMs,
     } satisfies ObservationDecision
   },
 )
@@ -344,7 +356,7 @@ const reduceDiscovery = Effect.fn("SessionSurface.reduceDiscovery")(
       )
     }
 
-    return yield* completeObservation(accumulator)
+    return yield* completeObservation(accumulator, observedAtMs)
   },
 )
 
@@ -390,7 +402,7 @@ const reducePolling = Effect.fn("SessionSurface.reducePolling")(
       recordSessionTransition(accumulator, transition)
     }
 
-    return yield* completeObservation(accumulator)
+    return yield* completeObservation(accumulator, observedAtMs)
   },
 )
 
@@ -398,7 +410,7 @@ const snapshotEvent = (
   views: NonEmptyReadonlyArray<SessionView>,
 ): SessionProtocolEvent =>
   SessionProtocolEvent.cases.SessionsSnapshot.make({
-    protocolVersion: 3,
+    protocolVersion: 4,
     views,
   })
 
@@ -409,7 +421,7 @@ const updatedEvent = (
   if (firstChanged === undefined) return snapshotEvent(decision.views)
 
   return SessionProtocolEvent.cases.SessionsUpdated.make({
-    protocolVersion: 3,
+    protocolVersion: 4,
     views: decision.views,
     changedSessionIds: [
       firstChanged,
@@ -561,8 +573,19 @@ export const layer = Layer.effect(
         views: reduced.views,
         lastCommitSequence: reduced.lastCommitSequence,
       }
+      const firstChangedView = reduced.changedViews[0]
+      if (firstChangedView === undefined) {
+        return {
+          event: storageUnavailableEvent(),
+          snapshot: current,
+          publish: true,
+        } satisfies FinalizedObservation
+      }
       const commitResult = yield* storage
-        .commit(current.lastCommitSequence, reduced.changedViews)
+        .commit(current.lastCommitSequence, {
+          recordedAtMs: reduced.recordedAtMs,
+          changedViews: [firstChangedView, ...reduced.changedViews.slice(1)],
+        })
         .pipe(Effect.result)
       return Result.isFailure(commitResult)
         ? {
@@ -593,6 +616,49 @@ export const layer = Layer.effect(
       initial.snapshot,
     )
     const transitionSemaphore = yield* Semaphore.make(1)
+
+    const inspectHistoryPage = Effect.fn(
+      "SessionSurface.inspectHistoryPage",
+    )(function* (
+      sessionId: SessionIdentity,
+      cursor: SessionHistoryCursor | null,
+    ) {
+      const loaded = yield* storage.loadHistoryPage(sessionId, cursor).pipe(
+        Effect.result,
+      )
+      if (Result.isFailure(loaded)) {
+        return SessionHistoryUnavailable.make({
+          protocolVersion: 4,
+          sessionId,
+          code: "history-unavailable",
+          message: "PackWalk could not read its retained session history",
+        })
+      }
+      if (Option.isNone(loaded.success)) {
+        return SessionHistoryUnavailable.make({
+          protocolVersion: 4,
+          sessionId,
+          code: cursor === null ? "session-not-found" : "invalid-history-cursor",
+          message: cursor === null
+            ? "PackWalk has no retained history for that exact session"
+            : "PackWalk could not continue that retained session history query",
+        })
+      }
+
+      const page = loaded.success.value
+      return SessionHistoryPage.make({
+        protocolVersion: 4,
+        sessionId,
+        explainedView: page.explainedView,
+        historyCoverage: page.historyCoverage,
+        omittedContent: sessionHistoryOmittedContent,
+        unsupportedFacts: sessionHistoryUnsupportedFacts,
+        facts: page.facts,
+        afterCommitSequence: cursor?.afterCommitSequence ?? 0,
+        throughCommitSequence: page.throughCommitSequence,
+        nextAfterCommitSequence: page.nextAfterCommitSequence,
+      })
+    })
 
     const observeOnce = Effect.fn("SessionSurface.observeOnce")(function* (
       trigger: SessionTransitionTrigger,
@@ -636,6 +702,11 @@ export const layer = Layer.effect(
       Effect.andThen(Effect.never),
     )
 
-    return Service.of({ events: eventState.events, refresh, runPolling })
+    return Service.of({
+      events: eventState.events,
+      inspectHistoryPage,
+      refresh,
+      runPolling,
+    })
   }),
 )

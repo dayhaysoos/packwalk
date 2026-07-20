@@ -1,7 +1,10 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 
-import { SessionCommand } from "../src/adapters/local-session-ipc.js"
+import {
+  MaximumSessionCommandBytes,
+  SessionCommand,
+} from "../src/adapters/local-session-ipc.js"
 import {
   MaximumSessionEventBytes,
   ProjectIdentity,
@@ -61,25 +64,25 @@ const legacyViewV1 = {
 const decodeStrict = <S extends Schema.Constraint>(schema: S) =>
   Schema.decodeUnknownEffect(schema, { onExcessProperty: "error" })
 
-it.effect("decodes only current protocol-v3 overview variants", () =>
+it.effect("decodes only current protocol-v4 overview variants", () =>
   Effect.gen(function* () {
     const inputs = [
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [discovered, secondDiscovered],
       }),
       SessionEvent.cases.SessionsUpdated.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [retained, secondDiscovered],
         changedSessionIds: [SessionIdentity.make(sessionId)],
       }),
       SessionEvent.cases.SessionUnavailable.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-unavailable",
         message: "PackWalk could not read supported Codex persisted evidence",
       }),
       SessionEvent.cases.SessionUnavailable.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "storage-unavailable",
         message: "PackWalk could not commit its current session view",
       }),
@@ -92,13 +95,29 @@ it.effect("decodes only current protocol-v3 overview variants", () =>
 
     const command = yield* decodeStrict(SessionCommand)({
       _tag: "SubscribeSessions",
-      protocolVersion: 3,
+      protocolVersion: 4,
     })
     expect(command._tag).toBe("SubscribeSessions")
+    const historyCommand = yield* decodeStrict(SessionCommand)({
+      _tag: "InspectSessionHistory",
+      protocolVersion: 4,
+      sessionId,
+      cursor: null,
+    })
+    expect(historyCommand._tag).toBe("InspectSessionHistory")
+    expect(yield* decodeStrict(SessionCommand)({
+      _tag: "InspectSessionHistory",
+      protocolVersion: 4,
+      sessionId,
+      cursor: {
+        afterCommitSequence: 32,
+        throughCommitSequence: 34,
+      },
+    })).toMatchObject({ cursor: { afterCommitSequence: 32 } })
   }),
 )
 
-it.effect("rejects raw legacy v1 and v2 events and commands", () =>
+it.effect("rejects raw legacy v1 through v3 events and commands", () =>
   Effect.gen(function* () {
     const legacyEvents = [
       {
@@ -117,6 +136,11 @@ it.effect("rejects raw legacy v1 and v2 events and commands", () =>
         code: "source-unavailable",
         message: "PackWalk could not read supported Codex persisted evidence",
       },
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 3,
+        views: [discovered],
+      },
     ]
 
     for (const input of legacyEvents) {
@@ -128,6 +152,13 @@ it.effect("rejects raw legacy v1 and v2 events and commands", () =>
       { _tag: "SubscribeSession", protocolVersion: 1 },
       { _tag: "SubscribeSessions", protocolVersion: 1 },
       { _tag: "SubscribeSessions", protocolVersion: 2 },
+      { _tag: "SubscribeSessions", protocolVersion: 3 },
+      {
+        _tag: "InspectSessionHistory",
+        protocolVersion: 3,
+        sessionId,
+        cursor: null,
+      },
     ]) {
       const result = yield* decodeStrict(SessionCommand)(command).pipe(
         Effect.result,
@@ -141,7 +172,7 @@ it.effect("fails closed on unknown, mismatched, or content-bearing current value
   Effect.gen(function* () {
     const forbidden = "synthetic-secret-prompt"
     const invalidInputs = [
-      { _tag: "UnknownSessionEvent", protocolVersion: 3 },
+      { _tag: "UnknownSessionEvent", protocolVersion: 4 },
       {
         _tag: "SessionsSnapshot",
         protocolVersion: 2,
@@ -149,22 +180,22 @@ it.effect("fails closed on unknown, mismatched, or content-bearing current value
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{ ...discovered, prompt: forbidden }],
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{ ...discovered, state: { _tag: "Watched" } }],
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{ ...discovered, freshness: "stale" }],
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           ...discovered,
           provenance: { _tag: "Retained", reason: "source-incompatible" },
@@ -172,12 +203,12 @@ it.effect("fails closed on unknown, mismatched, or content-bearing current value
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{ ...discovered, sessionId: "" }],
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           ...discovered,
           commitSequence: Number.MAX_SAFE_INTEGER + 1,
@@ -185,23 +216,23 @@ it.effect("fails closed on unknown, mismatched, or content-bearing current value
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [discovered, { ...secondDiscovered, sessionId }],
       },
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [discovered, { ...secondDiscovered, commitSequence: 1 }],
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [discovered, secondDiscovered],
         changedSessionIds: [],
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [discovered, secondDiscovered],
         changedSessionIds: [
           "019f77d2-1a10-7cf0-b5df-76eebb4071ad",
@@ -215,12 +246,38 @@ it.effect("fails closed on unknown, mismatched, or content-bearing current value
     }
 
     for (const command of [
-      { _tag: "UnknownCommand", protocolVersion: 3 },
-      { _tag: "SubscribeSession", protocolVersion: 3 },
+      { _tag: "UnknownCommand", protocolVersion: 4 },
+      { _tag: "SubscribeSession", protocolVersion: 4 },
       {
         _tag: "SubscribeSessions",
-        protocolVersion: 3,
+        protocolVersion: 4,
         prompt: forbidden,
+      },
+      {
+        _tag: "InspectSessionHistory",
+        protocolVersion: 4,
+        sessionId,
+        cursor: null,
+        rawIpcBody: forbidden,
+      },
+      {
+        _tag: "InspectSessionHistory",
+        protocolVersion: 4,
+        sessionId,
+        cursor: {
+          afterCommitSequence: 1,
+          throughCommitSequence: 2,
+          prompt: forbidden,
+        },
+      },
+      {
+        _tag: "InspectSessionHistory",
+        protocolVersion: 4,
+        sessionId,
+        cursor: {
+          afterCommitSequence: 2,
+          throughCommitSequence: 2,
+        },
       },
     ]) {
       const result = yield* decodeStrict(SessionCommand)(command).pipe(
@@ -234,7 +291,7 @@ it.effect("fails closed on unknown, mismatched, or content-bearing current value
 it("keeps the worst-case accepted identity encoding within one event frame", () => {
   const identity = "\u0000".repeat(4_096)
   const event = SessionEvent.cases.SessionsSnapshot.make({
-    protocolVersion: 3,
+    protocolVersion: 4,
     views: [
       SessionView.make({
         ...discovered,
@@ -246,5 +303,21 @@ it("keeps the worst-case accepted identity encoding within one event frame", () 
 
   expect(Buffer.byteLength(JSON.stringify(event), "utf8")).toBeLessThanOrEqual(
     MaximumSessionEventBytes,
+  )
+})
+
+it("keeps the worst-case accepted history command within its IPC frame", () => {
+  const identity = "\u0000".repeat(4_096)
+  const command = SessionCommand.cases.InspectSessionHistory.make({
+    protocolVersion: 4,
+    sessionId: SessionIdentity.make(identity),
+    cursor: {
+      afterCommitSequence: Number.MAX_SAFE_INTEGER - 1,
+      throughCommitSequence: Number.MAX_SAFE_INTEGER,
+    },
+  })
+
+  expect(Buffer.byteLength(JSON.stringify(command), "utf8")).toBeLessThanOrEqual(
+    MaximumSessionCommandBytes,
   )
 })

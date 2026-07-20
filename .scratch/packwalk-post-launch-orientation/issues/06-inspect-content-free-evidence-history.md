@@ -11,15 +11,15 @@ explains each session status without becoming a second transcript archive.
 
 ## Acceptance criteria
 
-- [ ] History exposes structural activity facts, PackWalk commit order,
+- [x] History exposes structural activity facts, PackWalk commit order,
       observation time, evidence source, provenance, freshness, and explicit
       omission/unsupported facts for one session.
-- [ ] Prompts, responses, tool output, command output, diffs, terminal input,
+- [x] Prompts, responses, tool output, command output, diffs, terminal input,
       raw Codex payloads, and raw IPC bodies are rejected at schema boundaries.
-- [ ] Inspection uses a public daemon query and can explain the current view
+- [x] Inspection uses a public daemon query and can explain the current view
       from committed facts without reaching into SQLite directly.
-- [ ] Ordering does not rely on wall-clock timestamps as a causal sequence.
-- [ ] History encoding, timestamps, and path metadata have deterministic,
+- [x] Ordering does not rely on wall-clock timestamps as a causal sequence.
+- [x] History encoding, timestamps, and path metadata have deterministic,
       content-free behavior on Windows, macOS, and Linux.
 
 ## Comments
@@ -34,3 +34,34 @@ explains each session status without becoming a second transcript archive.
   Ticket 06 does not add deletion, generic migration recovery, contention,
   native three-platform qualification, live attachment, intervention, routing,
   searchable transcript history, or raw provider retention.
+- 2026-07-20: Implementation is complete while the ticket remains `claimed`
+  for the required generic-review and product-preflight loops. `packwalk inspect
+  <exact-session-id> [text|json]` issues a protocol-v4 exact-session daemon
+  query, follows fixed 32-fact pages pinned to one `throughCommitSequence`, and
+  never refreshes the source or reads PackWalk SQLite from the client. The
+  result explains the current view using ordered structural facts and names
+  history coverage, omitted content, and unsupported facts explicitly.
+- 2026-07-20: Storage migration 4 adds an immutable scalar history table and a
+  SQLite-aware `.pre-migration-v4.sqlite` backup. Migration backfill is labelled
+  `MigratedBaseline` without inventing a recording timestamp or commit; later
+  commits atomically advance the allocator, update the current projection, and
+  append a `Committed` fact whose `recordedAtMs` remains distinct from the
+  source and observation clocks. Exact identity uses binary equality, and
+  causal order is exclusively the global PackWalk commit sequence.
+- 2026-07-20: Deterministic coverage includes strict excess-property rejection,
+  regressing wall clocks, migration/import/rollback behavior, pagination across
+  a concurrent later commit, read-only repeat inspection, daemon restart,
+  source loss and recovery, injected Windows/macOS/Linux encoding and path
+  laws, and compiled text/JSON commands over real local IPC. The opt-in test
+  also crossed an installed Codex persisted update through storage, daemon
+  publication, IPC, and public history inspection without changing Codex.
+  `npm run verify` passes 26 files, 170 tests, and one intentional host-policy
+  skip plus typecheck, lint, and the production build.
+- 2026-07-20: A cold real-product command exposed that the former five-second
+  client reconnect budget could expire while the new v4 daemon completed its
+  first migration and discovery. Both overview and inspection clients now
+  allow a bounded thirty-second startup budget. A fresh v4 daemon then served
+  the overview and rendered a real exact-session history through the compiled
+  CLI, including `prior-history-unavailable` coverage for migrated evidence.
+  Only the PackWalk-owned v4 test daemon was restarted; the pre-existing
+  protocol-v1 daemon PID 77857 remained alive and untouched.

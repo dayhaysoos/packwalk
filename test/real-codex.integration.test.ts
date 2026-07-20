@@ -7,7 +7,10 @@ import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer, Stream } from "effect"
 
-import { connectSessionEvents } from "../src/adapters/local-session-ipc.js"
+import {
+  connectSessionEvents,
+  inspectSessionHistory,
+} from "../src/adapters/local-session-ipc.js"
 import {
   RuntimePaths,
   runtimePathsLayer,
@@ -134,8 +137,8 @@ realCodexTest("observes one later persisted update from an ordinary existing Cod
     expect(updatedView).toBeDefined()
     if (initialView === undefined || updatedView === undefined) return
 
-    expect(initial.protocolVersion).toBe(3)
-    expect(update.protocolVersion).toBe(3)
+    expect(initial.protocolVersion).toBe(4)
+    expect(update.protocolVersion).toBe(4)
     expect(initialView).toMatchObject({
       protocolVersion: 2,
       freshness: "fresh",
@@ -155,6 +158,24 @@ realCodexTest("observes one later persisted update from an ordinary existing Cod
       true,
     )
     expect(updatedView.state._tag).toBe("Polled")
+
+    const history = yield* inspectSessionHistory(
+      endpoint,
+      updatedView.sessionId,
+    )
+    expect(history._tag).toBe("SessionHistory")
+    if (history._tag !== "SessionHistory") return
+    expect(history.sessionId).toBe(updatedView.sessionId)
+    expect(history.explainedView).toEqual(updatedView)
+    expect(history.facts.at(-1)?.view).toEqual(updatedView)
+    expect(history.facts.some(
+      (fact) => fact.view.commitSequence === initialView.commitSequence,
+    )).toBe(true)
+    expect(history.facts.map((fact) => fact.view.commitSequence)).toEqual(
+      [...history.facts]
+        .map((fact) => fact.view.commitSequence)
+        .sort((left, right) => left - right),
+    )
   }).pipe(
     Effect.provide(Layer.merge(NodeServices.layer, runtimePathsLayer)),
   ),

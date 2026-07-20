@@ -5,6 +5,7 @@ import {
   Deferred,
   Effect,
   Fiber,
+  Option,
   Queue,
   Ref,
   Schema,
@@ -15,16 +16,33 @@ import type * as SocketServer from "effect/unstable/socket/SocketServer"
 
 import {
   encodeSessionProtocolEvent,
+  encodeSessionHistoryProtocolResponse,
   MaximumSessionEventBytes,
+  SessionHistory,
+  SessionHistoryCursor,
+  SessionHistoryProtocolResponseJson,
+  SessionHistoryUnavailable,
+  type SessionHistoryCursor as SessionHistoryCursorValue,
+  type SessionHistoryCoverage,
+  type SessionEvidenceFact,
+  type SessionHistoryProtocolResponse,
+  SessionIdentity,
+  type SessionIdentity as SessionIdentityValue,
   SessionProtocolEventJson,
   type SessionProtocolEvent as SessionProtocolEventValue,
+  type SessionView,
 } from "../domain/session.js"
 
-const maximumCommandBytes = 4 * 1024
+export const MaximumSessionCommandBytes = 32 * 1024
 
 export const SessionCommand = Schema.TaggedUnion({
   SubscribeSessions: {
-    protocolVersion: Schema.Literal(3),
+    protocolVersion: Schema.Literal(4),
+  },
+  InspectSessionHistory: {
+    protocolVersion: Schema.Literal(4),
+    sessionId: SessionIdentity,
+    cursor: Schema.NullOr(SessionHistoryCursor),
   },
 })
 
@@ -133,11 +151,15 @@ const serveClient = (
   socket: import("effect/unstable/socket/Socket").Socket,
   events: Stream.Stream<SessionProtocolEventValue>,
   refresh: Effect.Effect<void>,
+  inspectHistoryPage: (
+    sessionId: SessionIdentityValue,
+    cursor: SessionHistoryCursorValue | null,
+  ) => Effect.Effect<SessionHistoryProtocolResponse>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const command = yield* Deferred.make<SessionCommand, LocalIpcError>()
-      const decodeFrames = yield* frameDecoder(maximumCommandBytes)
+      const decodeFrames = yield* frameDecoder(MaximumSessionCommandBytes)
       const write = yield* socket.writer
 
       const read = socket.run((chunk) =>
@@ -181,7 +203,21 @@ const serveClient = (
           ),
         ),
       )
-      yield* Effect.raceFirst(Deferred.await(command), readerStopped)
+      const request = yield* Effect.raceFirst(Deferred.await(command), readerStopped)
+      if (request._tag === "InspectSessionHistory") {
+        const response = yield* inspectHistoryPage(request.sessionId, request.cursor)
+        const encoded = yield* encodeSessionHistoryProtocolResponse(response).pipe(
+          Effect.mapError(() =>
+            ipcError(
+              "invalid-frame",
+              "PackWalk could not encode a session history response",
+            ),
+          ),
+        )
+        yield* write(`${encoded}\n`)
+        return
+      }
+
       yield* refresh
 
       yield* events.pipe(
@@ -204,10 +240,22 @@ export const runSessionEventServer = (
   server: SessionEventServer,
   events: Stream.Stream<SessionProtocolEventValue>,
   refresh: Effect.Effect<void> = Effect.void,
+  inspectHistoryPage: (
+    sessionId: SessionIdentityValue,
+    cursor: SessionHistoryCursorValue | null,
+  ) => Effect.Effect<SessionHistoryProtocolResponse> = (sessionId) =>
+    Effect.succeed(
+      SessionHistoryUnavailable.make({
+        protocolVersion: 4,
+        sessionId,
+        code: "history-unavailable",
+        message: "PackWalk could not read its retained session history",
+      }),
+    ),
 ): Effect.Effect<never, LocalIpcError> =>
   server
     .run((socket) =>
-      serveClient(socket, events, refresh).pipe(
+      serveClient(socket, events, refresh, inspectHistoryPage).pipe(
         Effect.catch(() => Effect.void),
       ),
     )
@@ -240,7 +288,7 @@ export const connectSessionEvents = (
     const decodeFrames = yield* frameDecoder(MaximumSessionEventBytes)
     const write = yield* socket.writer
     const request = yield* Schema.encodeEffect(SessionCommandJson)(
-      SessionCommand.cases.SubscribeSessions.make({ protocolVersion: 3 }),
+      SessionCommand.cases.SubscribeSessions.make({ protocolVersion: 4 }),
     ).pipe(
       Effect.mapError(() =>
         ipcError("invalid-frame", "PackWalk could not encode its IPC request"),
@@ -307,3 +355,175 @@ export const connectSessionEvents = (
 
     return Stream.fromQueue(queue)
   })
+
+const querySessionHistoryPage = (
+  endpoint: string,
+  sessionId: SessionIdentityValue,
+  cursor: SessionHistoryCursorValue | null,
+): Effect.Effect<SessionHistoryProtocolResponse, LocalIpcError, Scope.Scope> =>
+  Effect.gen(function* () {
+    const socket = yield* NodeSocket.makeNet({
+      path: endpoint,
+      openTimeout: "1 second",
+    })
+    const queue = yield* Queue.bounded<
+      SessionHistoryProtocolResponse,
+      LocalIpcError | Cause.Done
+    >(1)
+    const opened = yield* Deferred.make<void, LocalIpcError>()
+    const decodeFrames = yield* frameDecoder(MaximumSessionEventBytes)
+    const write = yield* socket.writer
+    const request = yield* Schema.encodeEffect(SessionCommandJson)(
+      SessionCommand.cases.InspectSessionHistory.make({
+        protocolVersion: 4,
+        sessionId,
+        cursor,
+      }),
+    ).pipe(
+      Effect.mapError(() =>
+        ipcError("invalid-frame", "PackWalk could not encode its IPC request"),
+      ),
+    )
+
+    const read = socket.run(
+      (chunk) =>
+        decodeFrames(chunk).pipe(
+          Effect.flatMap((lines) =>
+            Effect.forEach(lines, (line) =>
+              Schema.decodeUnknownEffect(SessionHistoryProtocolResponseJson, {
+                onExcessProperty: "error",
+              })(line).pipe(
+                Effect.mapError(() =>
+                  ipcError(
+                    "invalid-frame",
+                    "PackWalk received an invalid session history response",
+                  ),
+                ),
+                Effect.flatMap((response) => Queue.offer(queue, response)),
+              ),
+            ),
+          ),
+        ),
+      {
+        onOpen: write(`${request}\n`).pipe(
+          Effect.mapError(() =>
+            ipcError(
+              "connection-unavailable",
+              "PackWalk could not query its local session service",
+            ),
+          ),
+          Effect.matchEffect({
+            onFailure: (error) => Deferred.fail(opened, error),
+            onSuccess: () => Deferred.succeed(opened, undefined),
+          }),
+          Effect.asVoid,
+        ),
+      },
+    ).pipe(
+      Effect.mapError((error) =>
+        error instanceof LocalIpcError
+          ? error
+          : ipcError(
+              "connection-unavailable",
+              "PackWalk could not connect to its local session service",
+            ),
+      ),
+    )
+
+    yield* read.pipe(
+      Effect.matchEffect({
+        onFailure: (error) =>
+          Deferred.fail(opened, error).pipe(
+            Effect.andThen(Queue.fail(queue, error)),
+            Effect.asVoid,
+          ),
+        onSuccess: () => Queue.end(queue).pipe(Effect.asVoid),
+      }),
+      Effect.forkScoped,
+    )
+    yield* Deferred.await(opened)
+
+    return yield* Stream.fromQueue(queue).pipe(
+      Stream.runHead,
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              ipcError(
+                "connection-unavailable",
+                "PackWalk lost its local session connection",
+              ),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+    )
+  })
+
+export const inspectSessionHistory = Effect.fn("LocalSessionIpc.inspectHistory")(
+  function* (
+    endpoint: string,
+    sessionId: SessionIdentityValue,
+  ) {
+    let cursor: SessionHistoryCursorValue | null = null
+    let explainedView: SessionView | undefined
+    let historyCoverage: SessionHistoryCoverage | undefined
+    let throughCommitSequence: number | undefined
+    const facts: Array<SessionEvidenceFact> = []
+
+    while (true) {
+      const response = yield* Effect.scoped(
+        querySessionHistoryPage(endpoint, sessionId, cursor),
+      )
+      if (response._tag === "SessionHistoryUnavailable") return response
+
+      const expectedAfter = cursor?.afterCommitSequence ?? 0
+      if (
+        response.afterCommitSequence !== expectedAfter ||
+        (throughCommitSequence !== undefined &&
+          response.throughCommitSequence !== throughCommitSequence) ||
+        (explainedView !== undefined &&
+          JSON.stringify(response.explainedView) !== JSON.stringify(explainedView)) ||
+        (historyCoverage !== undefined &&
+          response.historyCoverage !== historyCoverage)
+      ) {
+        return yield* ipcError(
+          "invalid-frame",
+          "PackWalk received an invalid session history response",
+        )
+      }
+
+      explainedView ??= response.explainedView
+      historyCoverage ??= response.historyCoverage
+      throughCommitSequence ??= response.throughCommitSequence
+      facts.push(...response.facts)
+
+      if (response.nextAfterCommitSequence === null) {
+        return yield* Schema.decodeUnknownEffect(SessionHistory, {
+          onExcessProperty: "error",
+        })({
+          _tag: "SessionHistory",
+          protocolVersion: 4,
+          sessionId,
+          explainedView,
+          historyCoverage,
+          omittedContent: response.omittedContent,
+          unsupportedFacts: response.unsupportedFacts,
+          facts,
+        }).pipe(
+          Effect.mapError(() =>
+            ipcError(
+              "invalid-frame",
+              "PackWalk received an invalid session history response",
+            ),
+          ),
+        )
+      }
+
+      cursor = SessionHistoryCursor.make({
+        afterCommitSequence: response.nextAfterCommitSequence,
+        throughCommitSequence: response.throughCommitSequence,
+      })
+    }
+  },
+)

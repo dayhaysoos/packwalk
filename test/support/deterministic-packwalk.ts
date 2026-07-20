@@ -17,6 +17,7 @@ import {
 import { layer as sqliteSessionStorageLayer } from "../../src/adapters/sqlite-session-storage.js"
 import {
   connectSessionEvents,
+  inspectSessionHistory,
   LocalIpcError,
 } from "../../src/adapters/local-session-ipc.js"
 import {
@@ -29,6 +30,7 @@ import {
   sameSessionIdentity,
   SessionIdentity,
   type SessionEvent,
+  type SessionHistoryResult,
 } from "../../src/domain/session.js"
 
 interface SourceUpdate {
@@ -45,6 +47,9 @@ interface PersistSourceUpdate {
 
 interface DeterministicPackWalkControls {
   readonly events: Stream.Stream<SessionEvent, LocalIpcError>
+  readonly inspectHistory: (
+    sessionId: string,
+  ) => Effect.Effect<SessionHistoryResult, LocalIpcError>
   readonly persistSourceUpdate: PersistSourceUpdate
   readonly persistSourceIdentityForTest: (
     sessionId: string,
@@ -205,8 +210,9 @@ export const makeRestartableDeterministicPackWalk = (
               const storage = yield* SessionStorage
               return SessionStorage.of({
                 load: storage.load,
-                commit: (expectedPreviousCommitSequence, changedViews) =>
-                  changedViews.some(
+                loadHistoryPage: storage.loadHistoryPage,
+                commit: (expectedPreviousCommitSequence, observation) =>
+                  observation.changedViews.some(
                     (view) =>
                       view.commitSequence === options.failCommitSequence,
                   )
@@ -218,7 +224,7 @@ export const makeRestartableDeterministicPackWalk = (
                       )
                     : storage.commit(
                         expectedPreviousCommitSequence,
-                        changedViews,
+                        observation,
                       ),
               })
             }),
@@ -323,6 +329,8 @@ export const makeRestartableDeterministicPackWalk = (
       })
     return {
       events: Stream.unwrap(connectSessionEvents(endpoint)),
+      inspectHistory: (exactSessionId) =>
+        inspectSessionHistory(endpoint, SessionIdentity.make(exactSessionId)),
       startDaemonIn,
       persistSourceUpdate,
       persistSourceIdentityForTest,

@@ -691,15 +691,45 @@ intervention, and routing remain outside Ticket 05.
 
 [Ticket 06](../.scratch/packwalk-post-launch-orientation/issues/06-inspect-content-free-evidence-history.md)
 is claimed on `agent/ticket-06-content-free-history` from fixed integration
-point `0816410ea854b3a829ac49ee62826b58cc4174c4`. Its acceptance map requires an
-exact-session history query through the daemon, IPC, and plain CLI; durable
-content-free observations that explain the current projection; schema-level
-rejection of prompts, responses, output, diffs, terminal input, and raw
-payloads; causal ordering by PackWalk commit sequence rather than timestamps;
-and deterministic Windows/macOS/Linux encoding, timestamp, and path behavior.
-Deletion, generic migration recovery, contention, native platform
-qualification, live attachment, intervention, routing, and searchable
-transcript history remain outside Ticket 06.
+point `0816410ea854b3a829ac49ee62826b58cc4174c4`. Implementation is complete
+while the ticket remains claimed for fresh generic review and independent
+product preflight.
+
+Protocol v4 adds an exact-session, read-only history query through the daemon,
+IPC, and `packwalk inspect <exact-session-id> [text|json]`. The client follows
+fixed 32-fact pages pinned to one `throughCommitSequence`; inspection neither
+refreshes the Codex source nor reads PackWalk SQLite directly. Each result
+explains the current projection from causal PackWalk commit order and states
+history coverage, omitted content, and unsupported facts explicitly. Strict
+Effect schemas reject prompts, responses, tool and command output, diffs,
+terminal input, raw Codex payloads, raw IPC bodies, and excess nested fields.
+
+Storage migration 4 adds an immutable scalar history table and a SQLite-aware
+`.pre-migration-v4.sqlite` backup. Prior projections become truthful
+`MigratedBaseline` facts without invented recording times or commits. New
+nonempty batches atomically advance the global allocator, update current rows,
+and append `Committed` facts. `recordedAtMs` remains distinct from source and
+observation clocks; exact identity uses binary equality; causal order never
+depends on wall-clock order. Deterministic tests cover migration and import,
+rollback, concurrent pagination, restart, source loss and recovery, read-only
+repeat inspection, prohibited content, and injected Windows/macOS/Linux
+encoding and path behavior. Compiled text and JSON inspection crossed real
+local IPC, and the opt-in installed-Codex check crossed a real persisted update
+through storage, publication, IPC, and public history inspection without
+changing Codex. `npm run verify` passes 26 files, 170 tests, and one intentional
+host-policy skip plus typecheck, lint, and the production build.
+
+A cold real-product run also exposed that the former five-second reconnect
+budget could expire while a newly started v4 daemon completed first migration
+and discovery. Overview and inspection clients now have a bounded thirty-second
+startup budget. A fresh v4 daemon subsequently served the real overview and
+rendered an exact-session history, including explicit
+`prior-history-unavailable` coverage for migrated evidence. Only the
+PackWalk-owned v4 test daemon was restarted; the pre-existing protocol-v1
+daemon PID 77857 remained alive and untouched. Deletion, generic migration
+recovery, contention, native platform qualification, live attachment,
+intervention, routing, and searchable transcript history remain outside Ticket
+06.
 
 ## Reproduce
 
@@ -751,8 +781,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Complete claimed Ticket 05, then continue Tickets 06, 08, 09, 07, the
-   separate readability slice, and Ticket 10 in delivery order.
+2. Complete Ticket 06's fresh review and preflight loops, then continue Tickets
+   08, 09, 07, the separate readability slice, and Ticket 10 in delivery order.
 
 ## Fresh-agent comprehension check
 
@@ -771,9 +801,9 @@ following without inspecting old commits or another checkout:
 6. Ticket 01 is maintainer-accepted and resolved; the remaining local product
    continues through the polling, intervention-qualification, and routing
    phases without reopening its polling result.
-7. Ticket 04 is resolved and integrated with multiple persisted sessions kept
-   distinct by exact Codex identity; Ticket 05 now owns restoration and honest
-   stale/uncertain recovery.
+7. Tickets 04 and 05 are resolved and integrated: exact identities remain
+   distinct and restoration or degradation is explicit. Ticket 06 now owns
+   content-free evidence history and exact-session inspection.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote

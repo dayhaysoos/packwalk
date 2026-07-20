@@ -5,7 +5,10 @@ import { EOL } from "node:os"
 import { Effect, Layer, Stdio } from "effect"
 
 import { startPackWalkDaemon } from "./adapters/daemon-launcher.js"
-import { connectSessionEvents } from "./adapters/local-session-ipc.js"
+import {
+  connectSessionEvents,
+  inspectSessionHistory,
+} from "./adapters/local-session-ipc.js"
 import {
   prepareRuntimeDirectories,
   RuntimePaths,
@@ -26,6 +29,7 @@ import {
 } from "./client/plain-cli-output.js"
 import { runOneShotSessionClient } from "./client/one-shot-session-client.js"
 import { runSessionClient } from "./client/session-client.js"
+import { runSessionHistoryClient } from "./client/session-history-client.js"
 
 const cliProgram = Effect.scoped(
   Effect.gen(function* () {
@@ -34,24 +38,50 @@ const cliProgram = Effect.scoped(
     const paths = yield* RuntimePaths
     yield* prepareRuntimeDirectories
     yield* verifyRuntimeAuthority(paths)
-    const events = yield* connectOrStart({
+    const connectEvents = connectOrStart({
       connect: connectSessionEvents(paths.ipcEndpoint),
       startDaemon: startPackWalkDaemon,
       retryDelay: "100 millis",
-      retryAttempts: 50,
+      retryAttempts: 300,
     })
     yield* CliCommand.$match(command, {
       Refresh: () =>
-        makePlainCliOutput.pipe(
-          Effect.flatMap((output) => runSessionClient(events, output)),
+        connectEvents.pipe(
+          Effect.flatMap((events) =>
+            makePlainCliOutput.pipe(
+              Effect.flatMap((output) => runSessionClient(events, output)),
+            ),
+          ),
         ),
       OneShot: ({ format }) =>
-        makeOneShotCliOutput.pipe(
-          Effect.flatMap((output) =>
-            runOneShotSessionClient(events, output, {
-              format,
-              lineSeparator: EOL,
-            }),
+        connectEvents.pipe(
+          Effect.flatMap((events) =>
+            makeOneShotCliOutput.pipe(
+              Effect.flatMap((output) =>
+                runOneShotSessionClient(events, output, {
+                  format,
+                  lineSeparator: EOL,
+                }),
+              ),
+            ),
+          ),
+        ),
+      Inspect: ({ sessionId, format }) =>
+        connectOrStart({
+          connect: inspectSessionHistory(paths.ipcEndpoint, sessionId),
+          startDaemon: startPackWalkDaemon,
+          retryDelay: "100 millis",
+          retryAttempts: 300,
+        }).pipe(
+          Effect.flatMap((history) =>
+            makeOneShotCliOutput.pipe(
+              Effect.flatMap((output) =>
+                runSessionHistoryClient(history, output, {
+                  format,
+                  lineSeparator: EOL,
+                }),
+              ),
+            ),
           ),
         ),
     })

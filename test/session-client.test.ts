@@ -53,16 +53,16 @@ it.effect("writes observed and retained public views as visibly different CLI fr
     yield* runSessionClient(
       Stream.make(
         SessionEvent.cases.SessionsSnapshot.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [discovered],
         }),
         SessionEvent.cases.SessionsUpdated.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [polled],
           changedSessionIds: [SessionIdentity.make(sessionId)],
         }),
         SessionEvent.cases.SessionsUpdated.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [retained],
           changedSessionIds: [SessionIdentity.make(sessionId)],
         }),
@@ -127,11 +127,11 @@ it.effect("makes subsecond polling updates visibly distinct", () =>
     yield* runSessionClient(
       Stream.make(
         SessionEvent.cases.SessionsSnapshot.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [first],
         }),
         SessionEvent.cases.SessionsUpdated.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [second],
           changedSessionIds: [SessionIdentity.make(sessionId)],
         }),
@@ -173,7 +173,7 @@ it.effect("escapes every visible identity without truncating source details", ()
     yield* runSessionClient(
       Stream.make(
         SessionEvent.cases.SessionsSnapshot.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [view],
         }),
       ),
@@ -216,11 +216,11 @@ it.effect("keeps a complete project component and a useful root fallback", () =>
     yield* runSessionClient(
       Stream.make(
         SessionEvent.cases.SessionsSnapshot.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [makeView("/work/repository-with-very-long-name")],
         }),
         SessionEvent.cases.SessionsSnapshot.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           views: [makeView("/")],
         }),
       ),
@@ -245,7 +245,7 @@ it.effect("renders unavailable as one redacted table row", () =>
     yield* runSessionClient(
       Stream.make(
         SessionEvent.cases.SessionUnavailable.make({
-          protocolVersion: 3,
+          protocolVersion: 4,
           code: "source-incompatible",
           message: "PackWalk could not read supported Codex persisted evidence",
         }),

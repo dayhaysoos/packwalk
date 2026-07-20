@@ -103,9 +103,10 @@ const seedRestoredViews = Effect.fn("SessionStorage.SurfaceTest.seed")(
         commitSequence <= view.commitSequence;
         commitSequence += 1
       ) {
-        yield* storage.commit(lastCommitSequence, [
-          SessionView.make({ ...view, commitSequence }),
-        ])
+        yield* storage.commit(lastCommitSequence, {
+          recordedAtMs: view.observedAtMs,
+          changedViews: [SessionView.make({ ...view, commitSequence })],
+        })
         lastCommitSequence = commitSequence
       }
     }

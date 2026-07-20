@@ -10,10 +10,10 @@ without owning the lifecycle of the Codex sessions it assists.
 
 PackWalk's accepted first implementation is a read-only polling slice. It
 discovers supported existing Codex sessions, persists a content-free
-multi-session overview, exposes it through the PackWalk daemon, and displays
-polling updates in a plain command-line view without mixing exact identities.
-It does not yet establish trustworthy live attachment or perform a
-consequential action.
+multi-session overview and structural evidence history, exposes both through
+the PackWalk daemon, and displays polling updates in a plain command-line view
+without mixing exact identities. It does not yet establish trustworthy live
+attachment or perform a consequential action.
 
 Read-only behavior is the current delivery state, not PackWalk's permanent
 product boundary. The intended local product progresses from truthful
@@ -95,7 +95,7 @@ npm run --silent packwalk -- json
 
 `text` emits the same complete fields without terminal cursor controls. `json`
 emits the daemon's versioned Effect-Schema event: an available result is a
-protocol-v3 `SessionsSnapshot` containing protocol-v2 views in a required
+protocol-v4 `SessionsSnapshot` containing protocol-v2 views in a required
 nonempty `views` collection,
 while an unavailable source is a `SessionUnavailable` with a required redacted
 `code` and `message`. Committed polling normally emits `SessionsUpdated` with
@@ -111,11 +111,31 @@ connection or daemon failure, an empty stream, encoding failure, or output
 failure emits one redacted error to stderr and exits nonzero. Neither command
 reads Codex or PackWalk SQLite directly.
 
-Protocol-v3 overview clients use a versioned per-user local endpoint and never
-fall back to older events. The authoritative database remains
-`packwalk-v2.sqlite`; its checked storage-v3 migration preserves protocol-v2
-rows and takes an SQLite-aware pre-migration backup. A persistent protocol-v2
-daemon must release that shared database before the v3 daemon can migrate it.
+Inspect the committed structural history for one exact session with:
+
+```sh
+npm run --silent packwalk -- inspect <exact-session-id> text
+npm run --silent packwalk -- inspect <exact-session-id> json
+```
+
+Inspection queries the daemon rather than refreshing Codex or reading PackWalk
+SQLite from the client. It returns the current explained view plus facts in
+PackWalk commit order, with source-update, observation, and recording times kept
+distinct. Coverage states whether evidence predates durable history, while
+fixed omitted-content and unsupported-fact fields make clear that prompts,
+responses, tool or command output, diffs, terminal input, raw provider payloads,
+live observation, and attention inference are not present. The daemon serves
+bounded pages pinned to one commit ceiling; the CLI assembles them into one
+deterministic text or JSON document. An unknown exact identity returns an
+explicit tagged unavailable result. Exact session identity is case-sensitive,
+and `projectIdentity` is the only retained path metadata.
+
+Protocol-v4 overview and history clients use a versioned per-user local
+endpoint and never fall back to older events. The authoritative database
+remains `packwalk-v2.sqlite`; its checked storage-v4 migration preserves
+protocol-v2 current rows, backfills truthful history coverage, and takes an
+SQLite-aware pre-migration backup. A persistent protocol-v3 daemon must release
+that shared database before the v4 daemon can migrate it.
 PackWalk fails closed rather than killing the old daemon or opening a second
 writer; generic upgrade recovery remains Ticket 08 work. A persistent
 protocol-v1 daemon uses its separate legacy database and is neither killed nor
@@ -162,9 +182,11 @@ reconnect recovery after one continuously running CLI kept the same exact
 session and redrew a later committed source timestamp in place. Ticket 04's
 multi-session shape is resolved and integrated. Ticket 05's durable restoration
 and retained-evidence implementation is resolved with a clean final generic
-review and a `READY FOR MAINTAINER` independent product preflight. The view
-still has non-blocking visual-hierarchy feedback for a separate readability
-slice. See [current state](docs/current-state.md), [Ticket
+review and a `READY FOR MAINTAINER` independent product preflight. Ticket 06's
+content-free history implementation is complete and remains claimed for its
+fresh generic review and independent product preflight. The view still has
+non-blocking visual-hierarchy feedback for a separate readability slice. See
+[current state](docs/current-state.md), [Ticket
 01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md),
 and [Ticket
 04](.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md).
@@ -206,6 +228,7 @@ turn in Codex and does not require special Codex launch options.
 - [Text and JSON output ticket](.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
 - [Multi-session identity ticket](.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
 - [Restoration and degradation ticket](.scratch/packwalk-post-launch-orientation/issues/05-restore-and-degrade-the-overview-safely.md)
+- [Content-free evidence-history ticket](.scratch/packwalk-post-launch-orientation/issues/06-inspect-content-free-evidence-history.md)
 
 ## Source availability
 

@@ -91,7 +91,7 @@ it.effect("publishes one committed discovered snapshot and one committed polling
     expect(events).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           protocolVersion: 2,
           sessionId,
@@ -108,7 +108,7 @@ it.effect("publishes one committed discovered snapshot and one committed polling
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           protocolVersion: 2,
           sessionId,
@@ -250,7 +250,7 @@ it.effect("one-shot CLI retains a restored session omitted by discovery", () =>
 
     expect(yield* Ref.get(events)).toEqual([{
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         expect.objectContaining({
           sessionId: omittedSessionId,
@@ -324,7 +324,7 @@ it.effect("retains crossed exact polling results as unsupported without merging 
     expect(Array.from(yield* Fiber.join(published))).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [
           {
             protocolVersion: 2,
@@ -356,7 +356,7 @@ it.effect("retains crossed exact polling results as unsupported without merging 
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [
           expect.objectContaining({
             sessionId: firstSessionId,
@@ -392,7 +392,7 @@ it.effect("retains crossed exact polling results as unsupported without merging 
     expect(current).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [
           {
             protocolVersion: 2,
@@ -538,11 +538,11 @@ it.effect("falls back to a bounded complete snapshot when changed identities mak
       ...expectedPolledViews.slice(1),
     ] as const
     const expectedSnapshot = SessionEvent.cases.SessionsSnapshot.make({
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: expectedOverviewViews,
     })
     const oversizedUpdate = SessionEvent.cases.SessionsUpdated.make({
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: expectedOverviewViews,
       changedSessionIds: facts.map((fact) => fact.sessionId),
     })
@@ -640,7 +640,7 @@ it.effect("publishes the first successful reread once before later persisted act
     expect(Array.from(yield* Fiber.join(collected))).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           protocolVersion: 2,
           sessionId,
@@ -657,7 +657,7 @@ it.effect("publishes the first successful reread once before later persisted act
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           protocolVersion: 2,
           sessionId,
@@ -675,7 +675,7 @@ it.effect("publishes the first successful reread once before later persisted act
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           protocolVersion: 2,
           sessionId,
@@ -781,7 +781,7 @@ it.effect("rejects incompatible or content-bearing evidence with a redacted publ
       expect(events).toEqual([
         {
           _tag: "SessionUnavailable",
-          protocolVersion: 3,
+          protocolVersion: 4,
           code: "source-incompatible",
           message: "PackWalk could not read supported Codex persisted evidence",
         },
@@ -815,7 +815,7 @@ it.effect("surfaces unsupported discovery without dropping the committed overvie
     )
     expect(rejected).toEqual([{
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -930,7 +930,7 @@ it.effect("does not publish a session update when its authoritative commit fails
     expect(events[0]?._tag).toBe("SessionsSnapshot")
     expect(events[1]).toEqual({
       _tag: "SessionUnavailable",
-      protocolVersion: 3,
+      protocolVersion: 4,
       code: "storage-unavailable",
       message: "PackWalk could not commit its current session view",
     })
@@ -1021,7 +1021,7 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     const events = yield* Ref.get(secondRunEvents)
     expect(events[0]).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -1036,7 +1036,7 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     })
     expect(events[1]).toEqual({
       _tag: "SessionsUpdated",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -1057,7 +1057,7 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     })
     expect(events[2]).toMatchObject({
       _tag: "SessionsUpdated",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -1088,7 +1088,7 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
     const reconnect = yield* Ref.get(reconnectEvents)
     expect(reconnect).toEqual([
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: recovered.views,
       }),
     ])
@@ -1188,7 +1188,7 @@ it.effect("retains every session through whole-source loss and one-shot JSON rec
     const retained = yield* readJsonSnapshot()
     expect(retained.event).toEqual({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         {
           protocolVersion: 2,
@@ -1233,7 +1233,7 @@ it.effect("retains every session through whole-source loss and one-shot JSON rec
     const recovered = yield* readJsonSnapshot()
     expect(recovered.event).toEqual({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         {
           protocolVersion: 2,
@@ -1319,7 +1319,7 @@ it.effect("retains regressed discovery across restart and CLI reconnect", () =>
     )
     expect(yield* Ref.get(restartedEvents)).toEqual([{
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -1493,7 +1493,7 @@ it.effect("retains unsupported regressed evidence without overwriting the last s
     const events = Array.from(yield* Fiber.join(collected))
     expect(events[1]).toMatchObject({
       _tag: "SessionsUpdated",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         sessionId,
         freshness: "stale",
@@ -1509,7 +1509,7 @@ it.effect("retains unsupported regressed evidence without overwriting the last s
     })
     expect(events[2]).toMatchObject({
       _tag: "SessionsUpdated",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         sessionId,
         freshness: "fresh",

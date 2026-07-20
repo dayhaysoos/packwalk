@@ -187,7 +187,7 @@ it.effect("accepts only timestamps representable by JavaScript Date", () =>
   }),
 )
 
-it.effect("rejects otherwise-valid protocol-v3 overviews above the public frame limit", () =>
+it.effect("rejects otherwise-valid protocol-v4 overviews above the public frame limit", () =>
   Effect.gen(function* () {
     const escapedIdentityPrefix = "\0".repeat(4_090)
     const maximumProjectIdentity = ProjectIdentity.make("\0".repeat(4_096))
@@ -214,12 +214,12 @@ it.effect("rejects otherwise-valid protocol-v3 overviews above the public frame 
     const overviews = [
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views,
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views,
         changedSessionIds: [lastView.sessionId],
       },

@@ -34,7 +34,7 @@ const discovered = SessionView.make({
 })
 
 const snapshot = SessionEvent.cases.SessionsSnapshot.make({
-  protocolVersion: 3,
+  protocolVersion: 4,
   views: [discovered],
 })
 
@@ -59,7 +59,7 @@ it.effect("writes one platform-native plain-text document from the first public 
       commitSequence: 2,
     })
     const later = SessionEvent.cases.SessionsUpdated.make({
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [polled],
       changedSessionIds: [SessionIdentity.make(sessionId)],
     })
@@ -103,7 +103,7 @@ it.effect("Effect-Schema encodes one versioned content-free JSON document with p
     expect(rendered[0]?.endsWith("\n")).toBe(true)
     expect(JSON.parse(rendered[0] ?? "")).toEqual({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -128,7 +128,7 @@ it.effect("encodes source unavailability explicitly instead of omitting session 
   Effect.gen(function* () {
     const capture = yield* captureOutput
     const unavailable = SessionEvent.cases.SessionUnavailable.make({
-      protocolVersion: 3,
+      protocolVersion: 4,
       code: "source-unavailable",
       message: "PackWalk could not read supported Codex persisted evidence",
     })
@@ -143,7 +143,7 @@ it.effect("encodes source unavailability explicitly instead of omitting session 
     expect(rendered.endsWith("\r\n")).toBe(true)
     expect(JSON.parse(rendered)).toEqual({
       _tag: "SessionUnavailable",
-      protocolVersion: 3,
+      protocolVersion: 4,
       code: "source-unavailable",
       message: "PackWalk could not read supported Codex persisted evidence",
     })
@@ -198,7 +198,7 @@ it.effect("queries the real public daemon IPC seam for both one-shot formats", (
     expect(textDocument).toContain("OBSERVED")
     expect(JSON.parse(jsonDocument)).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         {
           protocolVersion: 2,

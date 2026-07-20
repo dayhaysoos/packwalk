@@ -140,7 +140,7 @@ const snapshotBytes = (projectIdentity: string): Uint8Array =>
   Buffer.from(
     `${JSON.stringify(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [
           SessionView.make({
             ...view,
@@ -194,11 +194,11 @@ it.effect("encodes and decodes the public session event stream across local IPC"
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [view],
       }),
       SessionEvent.cases.SessionsUpdated.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [
           SessionView.make({
             ...view,
@@ -261,7 +261,7 @@ it.live("rejects malformed UTF-8 in a session event instead of replacing bytes",
   }),
 )
 
-it.live("rejects a legacy singleton event on the protocol-v3 client", () =>
+it.live("rejects a legacy singleton event on the protocol-v4 client", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
     yield* Effect.addFinalizer(() =>
@@ -283,7 +283,7 @@ it.live("rejects a legacy singleton event on the protocol-v3 client", () =>
   }),
 )
 
-it.live("rejects a raw protocol-v2 overview event on the protocol-v3 client", () =>
+it.live("rejects a raw protocol-v2 overview event on the protocol-v4 client", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
     yield* Effect.addFinalizer(() =>
@@ -326,7 +326,7 @@ it.live("preserves a UTF-8 code point split across IPC chunks", () =>
     expect(received).toHaveLength(1)
     expect(received[0]).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{ projectIdentity }],
     })
   }),
@@ -358,7 +358,7 @@ it.live("continues serving after a peer disconnects before subscribing", () =>
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [view],
       }),
     )
@@ -383,7 +383,7 @@ it.live("closes a malformed-command peer and continues serving", () =>
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [view],
       }),
     )
@@ -408,7 +408,7 @@ it.live("rejects a protocol-v2 subscription without emitting a v3 event", () =>
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [view],
       }),
     )

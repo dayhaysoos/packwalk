@@ -34,6 +34,9 @@ export const DateTimestampMs = Schema.Int.check(
 const PositiveSafeInteger = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(1),
 )
+const NonNegativeSafeInteger = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+)
 
 export const CodexPersistedFact = Schema.Struct({
   version: Schema.Literal(1),
@@ -143,12 +146,12 @@ const overviewUnavailableMessage =
   "PackWalk could not publish its current session overview" as const
 
 const SessionsSnapshotFields = {
-  protocolVersion: Schema.Literal(3),
+  protocolVersion: Schema.Literal(4),
   views: SessionViews,
 } as const
 
 const SessionsUpdatedFields = {
-  protocolVersion: Schema.Literal(3),
+  protocolVersion: Schema.Literal(4),
   views: SessionViews,
   changedSessionIds: ChangedSessionIdentities,
 } as const
@@ -170,7 +173,7 @@ const SessionUnavailableMessage = Schema.Literals([
 
 interface SessionEventConsistencyInput {
   readonly _tag: string
-  readonly protocolVersion: 3
+  readonly protocolVersion: 4
   readonly views?: ReadonlyArray<SessionView>
   readonly changedSessionIds?: ReadonlyArray<SessionIdentity>
   readonly code?: typeof SessionUnavailableCode.Type
@@ -218,7 +221,7 @@ export const SessionProtocolEvent = Schema.TaggedUnion({
   SessionsSnapshot: SessionsSnapshotFields,
   SessionsUpdated: SessionsUpdatedFields,
   SessionUnavailable: {
-    protocolVersion: Schema.Literal(3),
+    protocolVersion: Schema.Literal(4),
     code: SessionUnavailableCode,
     message: SessionUnavailableMessage,
   },
@@ -250,6 +253,309 @@ export const SessionProtocolEventJson = SessionProtocolEventJsonValue.pipe(
 
 export const encodeSessionProtocolEvent = Schema.encodeEffect(
   SessionProtocolEventJson,
+)
+
+export const SessionEvidenceOrigin = Schema.TaggedUnion({
+  Committed: {
+    recordedAtMs: DateTimestampMs,
+  },
+  MigratedBaseline: {},
+})
+
+export type SessionEvidenceOrigin = typeof SessionEvidenceOrigin.Type
+
+export const SessionEvidenceFact = Schema.Struct({
+  factVersion: Schema.Literal(1),
+  origin: SessionEvidenceOrigin,
+  view: SessionView,
+})
+
+export interface SessionEvidenceFact extends Schema.Schema.Type<typeof SessionEvidenceFact> {}
+
+export const SessionHistoryCoverage = Schema.Literals([
+  "complete",
+  "prior-history-unavailable",
+])
+
+export type SessionHistoryCoverage = typeof SessionHistoryCoverage.Type
+
+export const sessionHistoryOmittedContent = [
+  "prompts",
+  "responses",
+  "tool-output",
+  "command-output",
+  "diff-content",
+  "terminal-input",
+  "raw-codex-payloads",
+  "raw-ipc-bodies",
+] as const
+
+export const SessionHistoryOmittedContent = Schema.Tuple([
+  Schema.Literal("prompts"),
+  Schema.Literal("responses"),
+  Schema.Literal("tool-output"),
+  Schema.Literal("command-output"),
+  Schema.Literal("diff-content"),
+  Schema.Literal("terminal-input"),
+  Schema.Literal("raw-codex-payloads"),
+  Schema.Literal("raw-ipc-bodies"),
+])
+
+export const sessionHistoryUnsupportedFacts = [
+  "live-observation",
+  "attention",
+] as const
+
+export const SessionHistoryUnsupportedFacts = Schema.Tuple([
+  Schema.Literal("live-observation"),
+  Schema.Literal("attention"),
+])
+
+export const SessionHistoryCursor = Schema.Struct({
+  afterCommitSequence: NonNegativeSafeInteger,
+  throughCommitSequence: PositiveSafeInteger,
+}).check(
+  Schema.makeFilter((cursor) =>
+    cursor.afterCommitSequence < cursor.throughCommitSequence
+      ? undefined
+      : "history cursor must advance toward its fixed snapshot",
+  ),
+)
+
+export interface SessionHistoryCursor extends Schema.Schema.Type<typeof SessionHistoryCursor> {}
+
+const sameSessionView = (left: SessionView, right: SessionView): boolean =>
+  left.protocolVersion === right.protocolVersion &&
+  sameSessionIdentity(left.sessionId, right.sessionId) &&
+  left.projectIdentity === right.projectIdentity &&
+  left.activity === right.activity &&
+  left.evidenceSource === right.evidenceSource &&
+  left.state._tag === right.state._tag &&
+  left.freshness === right.freshness &&
+  left.provenance._tag === right.provenance._tag &&
+  (left.provenance._tag === "Observed" ||
+    (right.provenance._tag === "Retained" &&
+      left.provenance.reason === right.provenance.reason)) &&
+  left.sourceUpdatedAtMs === right.sourceUpdatedAtMs &&
+  left.observedAtMs === right.observedAtMs &&
+  left.commitSequence === right.commitSequence
+
+interface SessionHistoryFactsConsistencyInput {
+  readonly sessionId: SessionIdentity
+  readonly explainedView: SessionView
+  readonly facts: ReadonlyArray<SessionEvidenceFact>
+}
+
+const SessionHistoryFactsConsistency = Schema.makeFilter<SessionHistoryFactsConsistencyInput>(
+  (history) => {
+    if (!sameSessionIdentity(history.sessionId, history.explainedView.sessionId)) {
+      return "history must explain the requested exact session"
+    }
+
+    let previousCommitSequence = 0
+    for (const fact of history.facts) {
+      if (!sameSessionIdentity(history.sessionId, fact.view.sessionId)) {
+        return "history facts must belong to the requested exact session"
+      }
+      if (fact.view.commitSequence <= previousCommitSequence) {
+        return "history facts must follow PackWalk commit order"
+      }
+      previousCommitSequence = fact.view.commitSequence
+    }
+
+    return undefined
+  },
+)
+
+interface SessionHistoryConsistencyInput extends SessionHistoryFactsConsistencyInput {
+  readonly historyCoverage: SessionHistoryCoverage
+}
+
+const SessionHistoryConsistency = Schema.makeFilter<SessionHistoryConsistencyInput>(
+  (history) => {
+    const migratedBaselines = history.facts.filter(
+      (fact) => fact.origin._tag === "MigratedBaseline",
+    )
+    if (
+      migratedBaselines.length > 0 &&
+      history.facts[0]?.origin._tag !== "MigratedBaseline"
+    ) {
+      return "a migrated history baseline must be the first retained fact"
+    }
+
+    const latest = history.facts.at(-1)
+    if (latest === undefined || !sameSessionView(latest.view, history.explainedView)) {
+      return "the latest history fact must equal the explained current view"
+    }
+
+    return history.historyCoverage === "complete"
+      ? migratedBaselines.length === 0
+        ? undefined
+        : "complete history cannot contain a migrated baseline"
+      : migratedBaselines.length === 1
+        ? undefined
+        : "unavailable prior history requires one migrated baseline"
+  },
+)
+
+const SessionHistoryFields = {
+  protocolVersion: Schema.Literal(4),
+  sessionId: SessionIdentity,
+  explainedView: SessionView,
+  historyCoverage: SessionHistoryCoverage,
+  omittedContent: SessionHistoryOmittedContent,
+  unsupportedFacts: SessionHistoryUnsupportedFacts,
+  facts: Schema.NonEmptyArray(SessionEvidenceFact),
+} as const
+
+export const SessionHistory = Schema.TaggedStruct(
+  "SessionHistory",
+  SessionHistoryFields,
+).check(SessionHistoryFactsConsistency, SessionHistoryConsistency)
+
+export type SessionHistory = typeof SessionHistory.Type
+
+const SessionHistoryPageFields = {
+  ...SessionHistoryFields,
+  afterCommitSequence: NonNegativeSafeInteger,
+  throughCommitSequence: PositiveSafeInteger,
+  nextAfterCommitSequence: Schema.NullOr(PositiveSafeInteger),
+} as const
+
+interface SessionHistoryPageConsistencyInput extends SessionHistoryConsistencyInput {
+  readonly afterCommitSequence: number
+  readonly throughCommitSequence: number
+  readonly nextAfterCommitSequence: number | null
+}
+
+const SessionHistoryPageConsistency = Schema.makeFilter<SessionHistoryPageConsistencyInput>(
+  (page) => {
+    const first = page.facts[0]
+    const last = page.facts.at(-1)
+    if (
+      first === undefined ||
+      last === undefined ||
+      first.view.commitSequence <= page.afterCommitSequence ||
+      last.view.commitSequence > page.throughCommitSequence ||
+      page.explainedView.commitSequence !== page.throughCommitSequence
+    ) {
+      return "history page must remain within its fixed commit snapshot"
+    }
+    const migratedBaselines = page.facts.filter(
+      (fact) => fact.origin._tag === "MigratedBaseline",
+    )
+    if (page.afterCommitSequence === 0) {
+      const validCoverage = page.historyCoverage === "complete"
+        ? migratedBaselines.length === 0
+        : migratedBaselines.length === 1 &&
+          page.facts[0]?.origin._tag === "MigratedBaseline"
+      if (!validCoverage) {
+        return "the first history page must truthfully describe prior coverage"
+      }
+    } else if (migratedBaselines.length > 0) {
+      return "continuation history pages cannot repeat a migrated baseline"
+    }
+
+    if (page.nextAfterCommitSequence === null) {
+      return sameSessionView(last.view, page.explainedView)
+        ? undefined
+        : "the final history page must reach the explained current view"
+    }
+
+    return page.nextAfterCommitSequence === last.view.commitSequence &&
+        page.nextAfterCommitSequence < page.throughCommitSequence
+      ? undefined
+      : "history continuation must follow the final returned fact"
+  },
+)
+
+export const SessionHistoryPage = Schema.TaggedStruct(
+  "SessionHistoryPage",
+  SessionHistoryPageFields,
+).check(SessionHistoryFactsConsistency, SessionHistoryPageConsistency)
+
+export type SessionHistoryPage = typeof SessionHistoryPage.Type
+
+const sessionHistoryNotFoundMessage =
+  "PackWalk has no retained history for that exact session" as const
+const sessionHistoryUnavailableMessage =
+  "PackWalk could not read its retained session history" as const
+const sessionHistoryCursorMessage =
+  "PackWalk could not continue that retained session history query" as const
+
+const SessionHistoryUnavailableCode = Schema.Literals([
+  "session-not-found",
+  "history-unavailable",
+  "invalid-history-cursor",
+])
+
+const SessionHistoryUnavailableMessage = Schema.Literals([
+  sessionHistoryNotFoundMessage,
+  sessionHistoryUnavailableMessage,
+  sessionHistoryCursorMessage,
+])
+
+const SessionHistoryUnavailableConsistency = Schema.makeFilter<{
+  readonly code: typeof SessionHistoryUnavailableCode.Type
+  readonly message: typeof SessionHistoryUnavailableMessage.Type
+}>((result) => {
+  const valid =
+    result.code === "session-not-found"
+      ? result.message === sessionHistoryNotFoundMessage
+      : result.code === "invalid-history-cursor"
+        ? result.message === sessionHistoryCursorMessage
+        : result.message === sessionHistoryUnavailableMessage
+  return valid
+    ? undefined
+    : "history unavailable code and message must describe the same failure"
+})
+
+export const SessionHistoryUnavailable = Schema.TaggedStruct(
+  "SessionHistoryUnavailable",
+  {
+    protocolVersion: Schema.Literal(4),
+    sessionId: SessionIdentity,
+    code: SessionHistoryUnavailableCode,
+    message: SessionHistoryUnavailableMessage,
+  },
+).check(SessionHistoryUnavailableConsistency)
+
+export type SessionHistoryUnavailable = typeof SessionHistoryUnavailable.Type
+
+export const SessionHistoryResult = Schema.Union([
+  SessionHistory,
+  SessionHistoryUnavailable,
+])
+
+export type SessionHistoryResult = typeof SessionHistoryResult.Type
+
+export const SessionHistoryProtocolResponse = Schema.Union([
+  SessionHistoryPage,
+  SessionHistoryUnavailable,
+])
+
+export type SessionHistoryProtocolResponse = typeof SessionHistoryProtocolResponse.Type
+
+const SessionHistoryProtocolResponseJsonString = Schema.String.check(
+  Schema.makeFilter((encoded) =>
+    identityEncoder.encode(encoded).byteLength <= MaximumSessionEventBytes
+      ? undefined
+      : "session history response exceeds PackWalk's UTF-8 frame limit",
+  ),
+)
+
+const SessionHistoryProtocolResponseJsonValue =
+  SessionHistoryProtocolResponseJsonString.pipe(
+    Schema.decodeTo(Schema.Unknown, SchemaTransformation.fromJsonString),
+  )
+
+export const SessionHistoryProtocolResponseJson =
+  SessionHistoryProtocolResponseJsonValue.pipe(
+    Schema.decodeTo(SessionHistoryProtocolResponse),
+  )
+
+export const encodeSessionHistoryProtocolResponse = Schema.encodeEffect(
+  SessionHistoryProtocolResponseJson,
 )
 
 export class IllegalSessionTransition extends Schema.TaggedErrorClass<IllegalSessionTransition>()(

@@ -6,8 +6,11 @@ import {
   CliUsageError,
   parseCliCommand,
 } from "../src/application/cli-command.js"
+import { SessionIdentity } from "../src/domain/session.js"
 
-it.effect("selects the refreshing, one-shot text, and one-shot JSON commands exactly", () =>
+const inspectedSessionId = SessionIdentity.make("session-1")
+
+it.effect("selects refreshing, one-shot, and exact-session inspection commands", () =>
   Effect.gen(function* () {
     expect(yield* parseCliCommand([])).toEqual(CliCommand.Refresh())
     expect(yield* parseCliCommand(["text"])).toEqual(
@@ -16,15 +19,34 @@ it.effect("selects the refreshing, one-shot text, and one-shot JSON commands exa
     expect(yield* parseCliCommand(["json"])).toEqual(
       CliCommand.OneShot({ format: "json" }),
     )
+    expect(yield* parseCliCommand(["inspect", "session-1"])).toEqual(
+      CliCommand.Inspect({ sessionId: inspectedSessionId, format: "text" }),
+    )
+    expect(
+      yield* parseCliCommand(["inspect", "session-1", "json"]),
+    ).toEqual(
+      CliCommand.Inspect({ sessionId: inspectedSessionId, format: "json" }),
+    )
   }),
 )
 
 it.effect("rejects flags, extra arguments, and unknown commands with one deterministic usage", () =>
   Effect.gen(function* () {
-    for (const args of [["--json"], ["text", "extra"], ["watch"]]) {
+    for (const args of [
+      ["--json"],
+      ["text", "extra"],
+      ["watch"],
+      ["inspect"],
+      ["inspect", ""],
+      ["inspect", "session-1", "--json"],
+      ["inspect", "session-1", "json", "extra"],
+    ]) {
       const failure = yield* parseCliCommand(args).pipe(Effect.flip)
       expect(failure).toEqual(
-        new CliUsageError({ usage: "Usage: packwalk [text|json]" }),
+        new CliUsageError({
+          usage:
+            "Usage: packwalk [text|json] | packwalk inspect <session-id> [text|json]",
+        }),
       )
     }
   }),

@@ -49,7 +49,7 @@ it.effect("reports the repository root for Codex working directories inside ordi
 
       expect(events[0]).toMatchObject({
         _tag: "SessionsSnapshot",
-        protocolVersion: 3,
+        protocolVersion: 4,
         views: [{
           protocolVersion: 2,
           projectIdentity: repositoryRoot,
@@ -82,7 +82,7 @@ it.effect("preserves the exact Codex working directory when no repository marker
 
     expect(events[0]).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         projectIdentity: workingDirectory,
@@ -123,7 +123,7 @@ it.effect("discovers and polls one content-free session from the Codex SQLite th
       "SessionsUpdated",
     ])
     expect(events[0]).toMatchObject({
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         {
           protocolVersion: 2,
@@ -137,7 +137,7 @@ it.effect("discovers and polls one content-free session from the Codex SQLite th
       ],
     })
     expect(events[1]).toMatchObject({
-      protocolVersion: 3,
+      protocolVersion: 4,
       changedSessionIds: [sessionId],
       views: [
         {
@@ -225,7 +225,7 @@ it.effect("adds a newly discovered identity without replacing the stored exact s
     )
     expect(first[0]).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [{
         protocolVersion: 2,
         sessionId,
@@ -247,7 +247,7 @@ it.effect("adds a newly discovered identity without replacing the stored exact s
     )
     expect(reconnected[0]).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         {
           protocolVersion: 2,
@@ -304,7 +304,7 @@ it.effect("rejects duplicate exact Codex session identities before selecting a r
     expect(events).toEqual([
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-ambiguous",
         message: "PackWalk found ambiguous Codex persisted evidence",
       },
@@ -376,7 +376,7 @@ it.effect("rejects Codex rows whose structural identity or timestamp is incompat
       expect(events).toHaveLength(1)
       expect(events[0]).toMatchObject({
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         message: "PackWalk could not read supported Codex persisted evidence",
       })
       if (events[0]?._tag === "SessionUnavailable") {

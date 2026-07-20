@@ -88,6 +88,12 @@ it.runIf(nativeTempStorageQualified)(
   const readme = readFileSync(join(repositoryRoot, "README.md"), "utf8")
   expect(readme).toContain("npm run --silent packwalk -- text")
   expect(readme).toContain("npm run --silent packwalk -- json")
+  expect(readme).toContain(
+    "npm run --silent packwalk -- inspect <exact-session-id> text",
+  )
+  expect(readme).toContain(
+    "npm run --silent packwalk -- inspect <exact-session-id> json",
+  )
 
   const staleDirectory = join(repositoryRoot, "dist", "testing")
   const staleArtifact = join(staleDirectory, "stale-helper.js")
@@ -117,7 +123,7 @@ it.runIf(nativeTempStorageQualified)(
   const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
   const event = {
     _tag: "SessionsSnapshot",
-    protocolVersion: 3,
+    protocolVersion: 4,
     views: [
       {
         protocolVersion: 2,
@@ -134,6 +140,42 @@ it.runIf(nativeTempStorageQualified)(
       },
     ],
   }
+  const historyPage = {
+    _tag: "SessionHistoryPage",
+    protocolVersion: 4,
+    sessionId,
+    explainedView: event.views[0],
+    historyCoverage: "complete",
+    omittedContent: [
+      "prompts",
+      "responses",
+      "tool-output",
+      "command-output",
+      "diff-content",
+      "terminal-input",
+      "raw-codex-payloads",
+      "raw-ipc-bodies",
+    ],
+    unsupportedFacts: ["live-observation", "attention"],
+    facts: [{
+      factVersion: 1,
+      origin: { _tag: "Committed", recordedAtMs: 2_000 },
+      view: event.views[0],
+    }],
+    afterCommitSequence: 0,
+    throughCommitSequence: 1,
+    nextAfterCommitSequence: null,
+  }
+  const historyDocument = {
+    _tag: "SessionHistory",
+    protocolVersion: 4,
+    sessionId,
+    explainedView: historyPage.explainedView,
+    historyCoverage: historyPage.historyCoverage,
+    omittedContent: historyPage.omittedContent,
+    unsupportedFacts: historyPage.unsupportedFacts,
+    facts: historyPage.facts,
+  }
   const sockets = new Set<Socket>()
   const activeChildren = new Set<ChildProcess>()
   let connectionCount = 0
@@ -148,7 +190,10 @@ it.runIf(nativeTempStorageQualified)(
       command += chunk
       if (!responded && command.includes("\n")) {
         responded = true
-        socket.write(`${JSON.stringify(event)}\n`)
+        const request = JSON.parse(command.slice(0, command.indexOf("\n")))
+        socket.write(`${JSON.stringify(
+          request._tag === "InspectSessionHistory" ? historyPage : event,
+        )}\n`)
       }
     })
   })
@@ -194,6 +239,16 @@ it.runIf(nativeTempStorageQualified)(
       environment,
       activeChildren,
     )
+    const historyText = await runDocumentedPackWalk(
+      ["inspect", sessionId, "text"],
+      environment,
+      activeChildren,
+    )
+    const historyJson = await runDocumentedPackWalk(
+      ["inspect", sessionId, "json"],
+      environment,
+      activeChildren,
+    )
     const invalid = await runDocumentedPackWalk(
       ["--json"],
       environment,
@@ -216,10 +271,23 @@ it.runIf(nativeTempStorageQualified)(
     expect(json.stdout.endsWith(EOL)).toBe(true)
     expect(JSON.parse(json.stdout)).toEqual(event)
 
+    expect(historyText.exitCode).toBe(0)
+    expect(historyText.stderr).toBe("")
+    expect(historyText.stdout).toContain(`SESSION ${sessionId}`)
+    expect(historyText.stdout).toContain("COMMIT 1")
+    expect(historyText.stdout).toContain("OMITTED CONTENT prompts, responses")
+    expect(historyText.stdout).not.toContain("\u001B")
+
+    expect(historyJson.exitCode).toBe(0)
+    expect(historyJson.stderr).toBe("")
+    expect(JSON.parse(historyJson.stdout)).toEqual(historyDocument)
+
     expect(invalid.exitCode).toBe(1)
     expect(invalid.stdout).toBe("")
-    expect(invalid.stderr).toBe(`Usage: packwalk [text|json]${EOL}`)
-    expect(connectionCount).toBe(2)
+    expect(invalid.stderr).toBe(
+      `Usage: packwalk [text|json] | packwalk inspect <session-id> [text|json]${EOL}`,
+    )
+    expect(connectionCount).toBe(4)
   } finally {
     try {
       await terminateActiveProcessTrees(activeChildren)
@@ -250,6 +318,12 @@ it.runIf(!nativeTempStorageQualified)(
     const readme = readFileSync(join(repositoryRoot, "README.md"), "utf8")
     expect(readme).toContain("npm run --silent packwalk -- text")
     expect(readme).toContain("npm run --silent packwalk -- json")
+    expect(readme).toContain(
+      "npm run --silent packwalk -- inspect <exact-session-id> text",
+    )
+    expect(readme).toContain(
+      "npm run --silent packwalk -- inspect <exact-session-id> json",
+    )
 
     const staleDirectory = join(repositoryRoot, "dist", "testing")
     const staleArtifact = join(staleDirectory, "stale-helper.js")
@@ -293,7 +367,7 @@ it.runIf(!nativeTempStorageQualified)(
       process.platform === "win32" ? "\\\\.\\pipe\\" : "/tmp"
     const listPackWalkEndpoints = (): ReadonlyArray<string> =>
       readdirSync(endpointNamespace)
-        .filter((entry) => entry.startsWith("packwalk-v3-"))
+        .filter((entry) => entry.startsWith("packwalk-v4-"))
         .sort()
     const endpointsBefore = listPackWalkEndpoints()
     const activeChildren = new Set<ChildProcess>()
@@ -334,7 +408,8 @@ it.runIf(!nativeTempStorageQualified)(
       expect(invalid).toEqual({
         exitCode: 1,
         stdout: "",
-        stderr: `Usage: packwalk [text|json]${EOL}`,
+        stderr:
+          `Usage: packwalk [text|json] | packwalk inspect <session-id> [text|json]${EOL}`,
       })
       expect(existsSync(packWalkDatabasePath)).toBe(false)
       expect(listPackWalkEndpoints()).toEqual(endpointsBefore)

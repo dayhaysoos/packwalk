@@ -11,7 +11,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Exit, Fiber, Layer, Result, Scope } from "effect"
+import { Context, Effect, Exit, Fiber, Layer, Option, Result, Scope } from "effect"
 
 import { Service as SessionStorage } from "../src/application/session-storage.js"
 import {
@@ -161,21 +161,41 @@ it.effect("upgrades a version-2 overview without inventing an observation", () =
     )
     const storage = Context.get(context, SessionStorage)
 
+    const migratedView = SessionView.make({
+      protocolVersion: 2,
+      sessionId: SessionIdentity.make(prior.sessionId),
+      projectIdentity: ProjectIdentity.make(prior.projectIdentity),
+      activity: "persisted Codex activity",
+      evidenceSource: "codex-sqlite-thread-index",
+      state: SessionState.cases.Polled.make({}),
+      freshness: "fresh",
+      provenance: SessionProvenance.cases.Observed.make({}),
+      sourceUpdatedAtMs: prior.sourceUpdatedAtMs,
+      observedAtMs: prior.observedAtMs,
+      commitSequence: prior.commitSequence,
+    })
     expect(yield* storage.load()).toEqual({
-      views: [{
-        protocolVersion: 2,
-        sessionId: prior.sessionId,
-        projectIdentity: prior.projectIdentity,
-        activity: prior.activity,
-        evidenceSource: prior.evidenceSource,
-        state: { _tag: "Polled" },
-        freshness: "fresh",
-        provenance: { _tag: "Observed" },
-        sourceUpdatedAtMs: prior.sourceUpdatedAtMs,
-        observedAtMs: prior.observedAtMs,
-        commitSequence: prior.commitSequence,
-      }],
+      views: [migratedView],
       lastCommitSequence: prior.commitSequence,
+    })
+    const migratedHistory = yield* storage.loadHistoryPage(
+      migratedView.sessionId,
+      null,
+    )
+    expect(Option.isSome(migratedHistory)).toBe(true)
+    if (Option.isNone(migratedHistory)) {
+      return yield* Effect.die("Expected migrated history baseline")
+    }
+    expect(migratedHistory.value).toEqual({
+      explainedView: migratedView,
+      historyCoverage: "prior-history-unavailable",
+      facts: [{
+        factVersion: 1,
+        origin: { _tag: "MigratedBaseline" },
+        view: migratedView,
+      }],
+      throughCommitSequence: prior.commitSequence,
+      nextAfterCommitSequence: null,
     })
     yield* Scope.close(storageScope, Exit.void)
 
@@ -188,6 +208,7 @@ it.effect("upgrades a version-2 overview without inventing an observation", () =
       ).toEqual([
         { version: 2, checksum: "a4c7d933c09ca96f969b1961c901975c2892b320155798ccd0c633a536f1e9da" },
         { version: 3, checksum: "b826aad5bc76aa893936ec447db0749a20e681108bf7ceb407313c1c88dddb11" },
+        { version: 4, checksum: "946f09fccb5320982114c7f41011c85b68f1ccbd8954854c2cfab1942edf548b" },
       ])
       expect(
         migrated
@@ -231,6 +252,32 @@ it.effect("upgrades a version-2 overview without inventing an observation", () =
       ).toBeUndefined()
     } finally {
       backupDatabase.close()
+    }
+
+    const preHistoryBackup = new DatabaseSync(
+      `${path}.pre-migration-v4.sqlite`,
+      { readOnly: true },
+    )
+    try {
+      expect(
+        preHistoryBackup
+          .prepare(`
+            SELECT name
+            FROM sqlite_schema
+            WHERE type = 'table' AND name = 'session_evidence_history'
+          `)
+          .get(),
+      ).toBeUndefined()
+      expect(
+        preHistoryBackup
+          .prepare("SELECT version, checksum FROM schema_migrations ORDER BY version")
+          .all(),
+      ).toEqual([
+        { version: 2, checksum: "a4c7d933c09ca96f969b1961c901975c2892b320155798ccd0c633a536f1e9da" },
+        { version: 3, checksum: "b826aad5bc76aa893936ec447db0749a20e681108bf7ceb407313c1c88dddb11" },
+      ])
+    } finally {
+      preHistoryBackup.close()
     }
   }),
   30_000,
@@ -374,6 +421,7 @@ it.effect("preserves a valid legacy session with a checked migration and SQLite 
       ).toEqual([
         { name: "current_sessions" },
         { name: "schema_migrations" },
+        { name: "session_evidence_history" },
         { name: "storage_state" },
       ])
       expect(
@@ -705,7 +753,10 @@ it.effect("never overwrites an existing versioned database with stale legacy sta
       3_000,
       4_000,
     )
-    yield* storage.commit(0, [currentView])
+    yield* storage.commit(0, {
+      recordedAtMs: currentView.observedAtMs,
+      changedViews: [currentView],
+    })
     yield* Effect.sync(() =>
       seedLooseSessionTable(legacyPath, {
         ...validRow,
@@ -864,10 +915,43 @@ it.effect("allocates one global sequence while isolating two session commits", (
       2_000,
     )
 
-    yield* storage.commit(0, [second, first])
+    yield* storage.commit(0, {
+      recordedAtMs: 2_000,
+      changedViews: [second, first],
+    })
     expect(yield* storage.load()).toEqual({
       views: [first, second],
       lastCommitSequence: 2,
+    })
+
+    const firstPage = yield* storage.loadHistoryPage(first.sessionId, null)
+    const secondPage = yield* storage.loadHistoryPage(second.sessionId, null)
+    expect(Option.isSome(firstPage)).toBe(true)
+    expect(Option.isSome(secondPage)).toBe(true)
+    if (Option.isNone(firstPage) || Option.isNone(secondPage)) {
+      return yield* Effect.die("Expected exact session history")
+    }
+    expect(firstPage.value).toEqual({
+      explainedView: first,
+      historyCoverage: "complete",
+      facts: [{
+        factVersion: 1,
+        origin: { _tag: "Committed", recordedAtMs: 2_000 },
+        view: first,
+      }],
+      throughCommitSequence: 1,
+      nextAfterCommitSequence: null,
+    })
+    expect(secondPage.value).toEqual({
+      explainedView: second,
+      historyCoverage: "complete",
+      facts: [{
+        factVersion: 1,
+        origin: { _tag: "Committed", recordedAtMs: 2_000 },
+        view: second,
+      }],
+      throughCommitSequence: 2,
+      nextAfterCommitSequence: null,
     })
 
     const updatedFirst = makeSessionView(
@@ -877,11 +961,37 @@ it.effect("allocates one global sequence while isolating two session commits", (
       2_500,
       "Polled",
     )
-    yield* storage.commit(2, [updatedFirst])
+    yield* storage.commit(2, {
+      recordedAtMs: 1_500,
+      changedViews: [updatedFirst],
+    })
     expect(yield* storage.load()).toEqual({
       views: [updatedFirst, second],
       lastCommitSequence: 3,
     })
+    const updatedFirstPage = yield* storage.loadHistoryPage(
+      first.sessionId,
+      null,
+    )
+    expect(Option.isSome(updatedFirstPage)).toBe(true)
+    if (Option.isNone(updatedFirstPage)) {
+      return yield* Effect.die("Expected updated exact session history")
+    }
+    expect(updatedFirstPage.value.facts.map((fact) => ({
+      sequence: fact.view.commitSequence,
+      recordedAtMs:
+        fact.origin._tag === "Committed"
+          ? fact.origin.recordedAtMs
+          : null,
+    }))).toEqual([
+      { sequence: 1, recordedAtMs: 2_000 },
+      { sequence: 3, recordedAtMs: 1_500 },
+    ])
+    expect(updatedFirstPage.value.explainedView).toEqual(updatedFirst)
+    expect(yield* storage.loadHistoryPage(
+      SessionIdentity.make("019f77d2-1a10-7cf0-b5df-76eebb4071ee"),
+      null,
+    )).toEqual(Option.none())
 
     const staleSecond = makeSessionView(
       second.sessionId,
@@ -891,7 +1001,10 @@ it.effect("allocates one global sequence while isolating two session commits", (
       "Polled",
     )
     const staleCommitError = yield* Effect.flip(
-      storage.commit(2, [staleSecond]),
+      storage.commit(2, {
+        recordedAtMs: 9_000,
+        changedViews: [staleSecond],
+      }),
     )
     expect(staleCommitError).toMatchObject({
       operation: "SessionStorage.commit",
@@ -901,6 +1014,243 @@ it.effect("allocates one global sequence while isolating two session commits", (
       views: [updatedFirst, second],
       lastCommitSequence: 3,
     })
+  }),
+)
+
+it.effect("pages one exact history in commit order through a fixed snapshot", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-history-page-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk.sqlite")
+    const context = yield* Layer.build(sqliteSessionStorageLayer(path))
+    const storage = Context.get(context, SessionStorage)
+    const exactSessionId = "Case-Sensitive-Session"
+    let latest = makeSessionView(exactSessionId, 1, 1_001, 2_001)
+    yield* storage.commit(0, {
+      recordedAtMs: 4_999,
+      changedViews: [latest],
+    })
+    for (let sequence = 2; sequence <= 34; sequence += 1) {
+      latest = makeSessionView(
+        exactSessionId,
+        sequence,
+        1_000 + sequence,
+        2_000 + sequence,
+        "Polled",
+      )
+      yield* storage.commit(sequence - 1, {
+        recordedAtMs: 5_000 - sequence,
+        changedViews: [latest],
+      })
+    }
+
+    const first = yield* storage.loadHistoryPage(latest.sessionId, null)
+    expect(Option.isSome(first)).toBe(true)
+    if (Option.isNone(first)) return yield* Effect.die("missing first history page")
+    expect(first.value.facts).toHaveLength(32)
+    expect(first.value.facts.map((fact) => fact.view.commitSequence)).toEqual(
+      Array.from({ length: 32 }, (_, index) => index + 1),
+    )
+    expect(first.value.throughCommitSequence).toBe(34)
+    expect(first.value.nextAfterCommitSequence).toBe(32)
+    expect(first.value.explainedView.commitSequence).toBe(34)
+
+    const newer = makeSessionView(
+      exactSessionId,
+      35,
+      1_035,
+      2_035,
+      "Polled",
+    )
+    yield* storage.commit(34, {
+      recordedAtMs: 1_000,
+      changedViews: [newer],
+    })
+    const second = yield* storage.loadHistoryPage(latest.sessionId, {
+      afterCommitSequence: 32,
+      throughCommitSequence: 34,
+    })
+    expect(Option.isSome(second)).toBe(true)
+    if (Option.isNone(second)) return yield* Effect.die("missing second history page")
+    expect(second.value.facts.map((fact) => fact.view.commitSequence)).toEqual([
+      33,
+      34,
+    ])
+    expect(second.value.explainedView.commitSequence).toBe(34)
+    expect(second.value.nextAfterCommitSequence).toBeNull()
+
+    const current = yield* storage.loadHistoryPage(newer.sessionId, null)
+    expect(Option.isSome(current)).toBe(true)
+    if (Option.isSome(current)) {
+      expect(current.value.throughCommitSequence).toBe(35)
+    }
+    expect(yield* storage.loadHistoryPage(
+      SessionIdentity.make("case-sensitive-session"),
+      null,
+    )).toEqual(Option.none())
+  }),
+)
+
+it.effect("rolls back allocator and projection when plain history insertion fails", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-history-rollback-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk.sqlite")
+    const first = makeSessionView(
+      "019f77d2-1a10-7cf0-b5df-76eebb4071ff",
+      1,
+      1_000,
+      2_000,
+    )
+    const firstScope = yield* Scope.make()
+    const firstContext = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(path),
+      firstScope,
+    )
+    yield* Context.get(firstContext, SessionStorage).commit(0, {
+      recordedAtMs: 2_000,
+      changedViews: [first],
+    })
+    yield* Scope.close(firstScope, Exit.void)
+
+    yield* Effect.sync(() => {
+      const database = new DatabaseSync(path)
+      try {
+        database.exec(`
+          CREATE TRIGGER reject_second_history
+          BEFORE INSERT ON session_evidence_history
+          WHEN NEW.commit_sequence = 2
+          BEGIN
+            SELECT RAISE(ABORT, 'synthetic history failure');
+          END;
+        `)
+      } finally {
+        database.close()
+      }
+    })
+
+    const secondScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
+    const secondContext = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(path),
+      secondScope,
+    )
+    const storage = Context.get(secondContext, SessionStorage)
+    const changed = makeSessionView(
+      first.sessionId,
+      2,
+      1_500,
+      2_500,
+      "Polled",
+    )
+    expect(yield* Effect.flip(storage.commit(1, {
+      recordedAtMs: 2_500,
+      changedViews: [changed],
+    }))).toMatchObject({ operation: "SessionStorage.commit" })
+    expect(yield* storage.load()).toEqual({
+      views: [first],
+      lastCommitSequence: 1,
+    })
+    const history = yield* storage.loadHistoryPage(first.sessionId, null)
+    expect(Option.isSome(history)).toBe(true)
+    if (Option.isSome(history)) {
+      expect(history.value.facts.map((fact) => fact.view.commitSequence)).toEqual([1])
+    }
+  }),
+)
+
+it.effect("preserves complete version-4 history during first-start import", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-v4-import-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const legacyPath = join(directory, "packwalk.sqlite")
+    const currentPath = join(directory, "packwalk-v2.sqlite")
+    const first = makeSessionView("v4-import-session", 1, 1_000, 2_000)
+    const second = makeSessionView(
+      first.sessionId,
+      2,
+      1_500,
+      2_500,
+      "Polled",
+    )
+    const legacyScope = yield* Scope.make()
+    const legacyContext = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(legacyPath),
+      legacyScope,
+    )
+    const legacyStorage = Context.get(legacyContext, SessionStorage)
+    yield* legacyStorage.commit(0, {
+      recordedAtMs: 2_000,
+      changedViews: [first],
+    })
+    yield* legacyStorage.commit(1, {
+      recordedAtMs: 1_500,
+      changedViews: [second],
+    })
+    yield* Scope.close(legacyScope, Exit.void)
+
+    const importedContext = yield* Layer.build(
+      sqliteSessionStorageLayer(currentPath, legacyPath),
+    )
+    const imported = Context.get(importedContext, SessionStorage)
+    const history = yield* imported.loadHistoryPage(first.sessionId, null)
+    expect(Option.isSome(history)).toBe(true)
+    if (Option.isNone(history)) return yield* Effect.die("missing imported v4 history")
+    expect(history.value.historyCoverage).toBe("complete")
+    expect(history.value.facts.map((fact) => ({
+      origin: fact.origin._tag,
+      sequence: fact.view.commitSequence,
+    }))).toEqual([
+      { origin: "Committed", sequence: 1 },
+      { origin: "Committed", sequence: 2 },
+    ])
+    expect(history.value.explainedView).toEqual(second)
+  }),
+)
+
+it.effect("rejects a version-4 migration ledger when its history table is missing", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-history-shape-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk.sqlite")
+    const initialScope = yield* Scope.make()
+    const initialContext = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(path),
+      initialScope,
+    )
+    yield* Context.get(initialContext, SessionStorage).commit(0, {
+      recordedAtMs: 2_000,
+      changedViews: [makeSessionView("history-shape-session", 1, 1_000, 2_000)],
+    })
+    yield* Scope.close(initialScope, Exit.void)
+
+    yield* Effect.sync(() => {
+      const database = new DatabaseSync(path)
+      try {
+        database.exec("PRAGMA foreign_keys = OFF; DROP TABLE session_evidence_history")
+      } finally {
+        database.close()
+      }
+    })
+
+    const reopened = yield* Effect.scoped(
+      Layer.build(sqliteSessionStorageLayer(path)),
+    ).pipe(Effect.result)
+    expect(Result.isFailure(reopened)).toBe(true)
+    if (Result.isFailure(reopened)) {
+      expect(reopened.failure).toMatchObject({
+        operation: "SessionStorage.open",
+        message: "PackWalk could not open its session storage",
+      })
+    }
   }),
 )
 
@@ -1005,7 +1355,10 @@ it.effect("retains sole-writer authority across commits until its storage scope 
       2_500,
     )
 
-    yield* firstStorage.commit(0, [first])
+    yield* firstStorage.commit(0, {
+      recordedAtMs: first.observedAtMs,
+      changedViews: [first],
+    })
     const competing = yield* Effect.promise(() =>
       Effect.runPromiseExit(
         Effect.scoped(
@@ -1015,7 +1368,10 @@ it.effect("retains sole-writer authority across commits until its storage scope 
     )
     expect(Exit.isFailure(competing)).toBe(true)
 
-    yield* firstStorage.commit(1, [second])
+    yield* firstStorage.commit(1, {
+      recordedAtMs: second.observedAtMs,
+      changedViews: [second],
+    })
     expect(yield* firstStorage.load()).toEqual({
       views: [first, second],
       lastCommitSequence: 2,

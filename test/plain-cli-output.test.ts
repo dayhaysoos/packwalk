@@ -36,11 +36,11 @@ const sessionEvents = () => {
 
   return Stream.make(
     SessionEvent.cases.SessionsSnapshot.make({
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [discovered],
     }),
     SessionEvent.cases.SessionsUpdated.make({
-      protocolVersion: 3,
+      protocolVersion: 4,
       views: [
         SessionView.make({
           ...discovered,

@@ -57,7 +57,7 @@ export interface DurableDatabaseAuthority {
 
 // Incompatible command/event protocols use distinct endpoints so a newly
 // installed client cannot silently connect to a persistent older daemon.
-const sessionIpcNamespace = "v3"
+const sessionIpcNamespace = "v4"
 
 const qualifiedLocalLinuxFileSystemTypes = new Set([
   0x0000_3434n, // NILFS2

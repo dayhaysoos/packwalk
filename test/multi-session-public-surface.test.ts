@@ -72,7 +72,7 @@ it.effect("keeps two overlapping same-repository sessions distinct through IPC a
     }
 
     for (const event of [initial, baseline, updated]) {
-      expect(event.protocolVersion).toBe(3)
+      expect(event.protocolVersion).toBe(4)
       expect(
         event.views.every(
           (view) =>
@@ -145,7 +145,7 @@ it.effect("publishes a redacted unavailable result for duplicate exact source id
     expect(events).toEqual([
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 3,
+        protocolVersion: 4,
         code: "source-ambiguous",
         message: "PackWalk found ambiguous Codex persisted evidence",
       },

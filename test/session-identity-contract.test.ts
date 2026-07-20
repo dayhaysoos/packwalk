@@ -74,8 +74,9 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
       Effect.gen(function* () {
         const context = yield* Layer.build(sqliteSessionStorageLayer(path))
         const storage = Context.get(context, SessionStorage)
-        yield* storage.commit(0, [
-          SessionView.make({
+        yield* storage.commit(0, {
+          recordedAtMs: 2_000,
+          changedViews: [SessionView.make({
             protocolVersion: 2,
             sessionId,
             projectIdentity,
@@ -87,8 +88,8 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
             sourceUpdatedAtMs: 1_000,
             observedAtMs: 2_000,
             commitSequence: 1,
-          }),
-        ])
+          })],
+        })
         return yield* storage.load()
       }),
     )

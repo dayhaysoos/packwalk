@@ -30,7 +30,12 @@ const makeSessionDaemon = (server: SessionEventServer) =>
     yield* FiberSet.run(workers, surface.runPolling)
     yield* FiberSet.run(
       workers,
-      runSessionEventServer(server, surface.events, surface.refresh()),
+      runSessionEventServer(
+        server,
+        surface.events,
+        surface.refresh(),
+        surface.inspectHistoryPage,
+      ),
     )
 
     return Service.of({
