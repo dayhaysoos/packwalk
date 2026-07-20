@@ -110,6 +110,13 @@ product failure was established, and every safe check was exhausted. The only
 remaining evidence is the maintainer-started default-TUI snapshot documented in
 the ticket. No production code or `watched` state was added.
 
+[Ticket 03](../.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
+is claimed on `agent/ticket-03-text-json-output` from integration fixed point
+`6c4686dca30466b52db56785ef159348a28a4d1e`. It is adding deterministic
+one-shot plain-text and Effect-Schema encoded JSON views by consuming the same
+initial public daemon event as the refreshing CLI. Direct Codex or SQLite reads
+remain outside the client boundary.
+
 ## Reproduce
 
 Use the exact versions pinned by the repository:
