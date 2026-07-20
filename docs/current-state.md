@@ -85,8 +85,8 @@ reopen Ticket 01 polling.
 
 The accepted Ticket 01 slice is published on `main` at
 `e7c7808f4b0ba1b90803634a7f8613beffb96383`, and
-`integration/full-local-product` has advanced through resolved Ticket 03 at
-`31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8`.
+`integration/full-local-product` has advanced through resolved Ticket 04 at
+`ef6ed5074b6a039ae7ced76e50508405c82f338e`.
 
 [Ticket 02](../.scratch/packwalk-post-launch-orientation/issues/02-attempt-one-post-launch-live-codex-event.md)
 is `needs-info` on `agent/ticket-02-live-event-experiment`. Static inspection
@@ -618,6 +618,17 @@ Ticket 05's stale/degraded recovery semantics, evidence history, deletion,
 live attachment, intervention, and routing remain outside Ticket 04, and no
 maintainer acceptance is claimed.
 
+[Ticket 05](../.scratch/packwalk-post-launch-orientation/issues/05-restore-and-degrade-the-overview-safely.md)
+is claimed on `agent/ticket-05-safe-restoration` from fixed integration point
+`ef6ed5074b6a039ae7ced76e50508405c82f338e`. Its public lifecycle proof will
+restore commit N through a second daemon scope without inventing observation,
+commit explicit stale/uncertain retained metadata on source loss, recover the
+same persisted fact exactly once as fresh N+2, and cover injected
+Windows/macOS/Linux path and reconnect semantics. Evidence history, deletion,
+generic migration/backup recovery, contention handling, native three-platform
+qualification, live attachment, intervention, and routing remain outside this
+ticket.
+
 ## Reproduce
 
 Use the exact versions pinned by the repository:
@@ -668,8 +679,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Finish Ticket 04's generic review and product preflight, then continue
-   Tickets 05–10 in dependency order, including a separate readability slice.
+2. Complete claimed Ticket 05, then continue Tickets 06, 08, 09, 07, the
+   separate readability slice, and Ticket 10 in delivery order.
 
 ## Fresh-agent comprehension check
 
@@ -688,8 +699,9 @@ following without inspecting old commits or another checkout:
 6. Ticket 01 is maintainer-accepted and resolved; the remaining local product
    continues through the polling, intervention-qualification, and routing
    phases without reopening its polling result.
-7. Ticket 04's implementation keeps multiple persisted sessions distinct by
-   exact Codex identity and is awaiting independent review before resolution.
+7. Ticket 04 is resolved and integrated with multiple persisted sessions kept
+   distinct by exact Codex identity; Ticket 05 now owns restoration and honest
+   stale/uncertain recovery.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote
