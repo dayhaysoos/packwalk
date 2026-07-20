@@ -1,8 +1,10 @@
-import { DatabaseSync } from "node:sqlite"
+import { createHash } from "node:crypto"
+import { backup, DatabaseSync } from "node:sqlite"
 
-import { Effect, Layer, Option, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 
 import {
+  type NonEmptySessionFacts,
   Service as SessionSource,
   SessionSourceError,
 } from "../application/session-source.js"
@@ -18,8 +20,22 @@ import {
 } from "../domain/session.js"
 import {
   makeProjectIdentityResolver,
+  projectIdentityComparisonKey,
+  type ProjectIdentityPlatform,
   type ProjectIdentityResolver,
 } from "./project-identity.js"
+
+const MaximumSafeInteger = Number.MAX_SAFE_INTEGER
+
+const NonNegativeSafeInteger = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(MaximumSafeInteger),
+)
+
+const PositiveSafeInteger = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(1),
+  Schema.isLessThanOrEqualTo(MaximumSafeInteger),
+)
 
 const CodexThreadRow = Schema.Struct({
   session_id: SessionIdentity,
@@ -27,8 +43,9 @@ const CodexThreadRow = Schema.Struct({
   source_updated_at_ms: DateTimestampMs,
 })
 
+interface CodexThreadRow extends Schema.Schema.Type<typeof CodexThreadRow> {}
+
 const SessionRow = Schema.Struct({
-  singleton: Schema.Literal(1),
   protocol_version: Schema.Literal(1),
   session_id: SessionIdentity,
   project_identity: ProjectIdentity,
@@ -38,7 +55,23 @@ const SessionRow = Schema.Struct({
   freshness: Schema.Literal("fresh"),
   source_updated_at_ms: DateTimestampMs,
   observed_at_ms: DateTimestampMs,
-  commit_sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  commit_sequence: PositiveSafeInteger,
+})
+
+const LegacySessionRow = Schema.Struct({
+  singleton: Schema.Literal(1),
+  ...SessionRow.fields,
+})
+
+const StorageStateRow = Schema.Struct({
+  singleton: Schema.Literal(1),
+  last_commit_sequence: NonNegativeSafeInteger,
+})
+
+const TableNameRow = Schema.Struct({ name: Schema.NonEmptyString })
+const MigrationRow = Schema.Struct({
+  version: Schema.Literal(2),
+  checksum: Schema.NonEmptyString,
 })
 
 const storageErrorMessages = {
@@ -57,19 +90,29 @@ const storageError = (operation: StorageOperation) =>
   })
 
 const sourceError = (
-  code: "unavailable" | "unsupported" | "invalid-evidence",
+  code: "unavailable" | "unsupported" | "invalid-evidence" | "ambiguous",
 ) =>
   new SessionSourceError({
     code,
-    message: "Codex persisted evidence is unavailable or incompatible",
+    message:
+      code === "ambiguous"
+        ? "Codex persisted evidence is ambiguous"
+        : "Codex persisted evidence is unavailable or incompatible",
   })
 
-const readCodexThread = Effect.fn("CodexSource.readThread")(function* (
+const compareStrings = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0
+
+const isProjectIdentityPlatform = (
+  platform: NodeJS.Platform,
+): platform is ProjectIdentityPlatform =>
+  platform === "darwin" || platform === "linux" || platform === "win32"
+
+const queryCodexThreads = Effect.fn("CodexSource.queryThreads")(function* (
   path: string,
-  projectIdentityResolver: ProjectIdentityResolver,
   sessionId?: SessionIdentity,
 ) {
-  const row = yield* Effect.try({
+  const rows = yield* Effect.try({
     try: () => {
       const database = new DatabaseSync(path, {
         allowBareNamedParameters: false,
@@ -126,10 +169,9 @@ const readCodexThread = Effect.fn("CodexSource.readThread")(function* (
                   updated_at_ms AS source_updated_at_ms
                 FROM threads
                 WHERE thread_source = 'user' AND archived = 0
-                ORDER BY updated_at_ms DESC, id DESC
-                LIMIT 1
+                ORDER BY updated_at_ms DESC, id COLLATE BINARY DESC
               `)
-              .get()
+              .all()
           : database
               .prepare(`
                 SELECT
@@ -137,10 +179,13 @@ const readCodexThread = Effect.fn("CodexSource.readThread")(function* (
                   cwd AS session_cwd,
                   updated_at_ms AS source_updated_at_ms
                 FROM threads
-                WHERE id = ? AND thread_source = 'user' AND archived = 0
-                LIMIT 1
+                WHERE
+                  id COLLATE BINARY = ? AND
+                  thread_source = 'user' AND
+                  archived = 0
+                ORDER BY id COLLATE BINARY
               `)
-              .get(sessionId)
+              .all(sessionId)
       } finally {
         database.close()
       }
@@ -149,28 +194,97 @@ const readCodexThread = Effect.fn("CodexSource.readThread")(function* (
       error instanceof SessionSourceError ? error : sourceError("unavailable"),
   })
 
-  if (row === undefined) {
+  return yield* Schema.decodeUnknownEffect(Schema.Array(CodexThreadRow), {
+    onExcessProperty: "error",
+  })(rows).pipe(
+    Effect.mapError(() => sourceError("invalid-evidence")),
+  )
+})
+
+const ensureUniqueSourceIdentity = (
+  rows: ReadonlyArray<CodexThreadRow>,
+): Effect.Effect<void, SessionSourceError> => {
+  const identities = new Set<string>()
+  for (const row of rows) {
+    if (identities.has(row.session_id)) {
+      return Effect.fail(sourceError("ambiguous"))
+    }
+    identities.add(row.session_id)
+  }
+  return Effect.void
+}
+
+const decodeCodexFacts = Effect.fn("CodexSource.decodeFacts")(function* (
+  rows: ReadonlyArray<CodexThreadRow>,
+  projectIdentityResolver: ProjectIdentityResolver,
+) {
+  yield* ensureUniqueSourceIdentity(rows)
+
+  return yield* Effect.forEach(rows, (row) =>
+    projectIdentityResolver.resolve(row.session_cwd).pipe(
+      Effect.mapError(() => sourceError("invalid-evidence")),
+      Effect.map((projectIdentity) =>
+        CodexPersistedFact.make({
+          version: 1,
+          sessionId: row.session_id,
+          projectIdentity,
+          sourceUpdatedAtMs: row.source_updated_at_ms,
+        }),
+      ),
+    ),
+  )
+})
+
+const discoverCodexThreads = Effect.fn("CodexSource.discover")(function* (
+  path: string,
+  projectIdentityResolver: ProjectIdentityResolver,
+  platform: ProjectIdentityPlatform,
+) {
+  const rows = yield* queryCodexThreads(path)
+  if (rows.length === 0) {
     return yield* sourceError("unavailable")
   }
 
-  const decoded = yield* Schema.decodeUnknownEffect(CodexThreadRow, {
-    onExcessProperty: "error",
-  })(row).pipe(
-    Effect.mapError(() => sourceError("invalid-evidence")),
-  )
-
-  const projectIdentity = yield* projectIdentityResolver
-    .resolve(decoded.session_cwd)
-    .pipe(
-      Effect.mapError(() => sourceError("invalid-evidence")),
+  const facts = yield* decodeCodexFacts(rows, projectIdentityResolver)
+  const ordered = [...facts].sort((left, right) => {
+    const projectOrder = compareStrings(
+      projectIdentityComparisonKey(left.projectIdentity, platform),
+      projectIdentityComparisonKey(right.projectIdentity, platform),
     )
+    if (projectOrder !== 0) return projectOrder
 
-  return CodexPersistedFact.make({
-    version: 1,
-    sessionId: decoded.session_id,
-    projectIdentity,
-    sourceUpdatedAtMs: decoded.source_updated_at_ms,
+    const exactProjectOrder = compareStrings(
+      left.projectIdentity,
+      right.projectIdentity,
+    )
+    return exactProjectOrder !== 0
+      ? exactProjectOrder
+      : compareStrings(left.sessionId, right.sessionId)
   })
+  const first = ordered[0]
+  if (first === undefined) {
+    return yield* sourceError("unavailable")
+  }
+  const discovered: NonEmptySessionFacts = [first, ...ordered.slice(1)]
+  return discovered
+})
+
+const pollCodexThread = Effect.fn("CodexSource.poll")(function* (
+  path: string,
+  projectIdentityResolver: ProjectIdentityResolver,
+  sessionId: SessionIdentity,
+) {
+  const rows = yield* queryCodexThreads(path, sessionId)
+  if (rows.length === 0) {
+    return yield* sourceError("unavailable")
+  }
+  if (rows.length > 1) {
+    return yield* sourceError("ambiguous")
+  }
+
+  const facts = yield* decodeCodexFacts(rows, projectIdentityResolver)
+  const fact = facts[0]
+  return fact === undefined ? yield* sourceError("unavailable") : fact
 })
 
 export const codexSourceLayer = (path: string) =>
@@ -178,16 +292,273 @@ export const codexSourceLayer = (path: string) =>
     SessionSource,
     Effect.gen(function* () {
       const projectIdentityResolver = yield* makeProjectIdentityResolver
+      if (!isProjectIdentityPlatform(process.platform)) {
+        return yield* sourceError("unsupported")
+      }
+      const platform = process.platform
 
       return SessionSource.of({
-        discover: () => readCodexThread(path, projectIdentityResolver),
+        discover: () =>
+          discoverCodexThreads(path, projectIdentityResolver, platform),
         poll: (sessionId) =>
-          readCodexThread(path, projectIdentityResolver, sessionId),
+          pollCodexThread(path, projectIdentityResolver, sessionId),
       })
     }),
   )
 
-const openDatabase = (path: string) =>
+const createCurrentSchemaSql = `
+  CREATE TABLE current_sessions (
+    session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
+      length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    protocol_version INTEGER NOT NULL CHECK (protocol_version = 1),
+    project_identity TEXT NOT NULL CHECK (
+      length(CAST(project_identity AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
+    evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
+    state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
+    freshness TEXT NOT NULL CHECK (freshness = 'fresh'),
+    source_updated_at_ms INTEGER NOT NULL CHECK (
+      source_updated_at_ms >= 0 AND
+      source_updated_at_ms <= 8640000000000000
+    ),
+    observed_at_ms INTEGER NOT NULL CHECK (
+      observed_at_ms >= 0 AND
+      observed_at_ms <= 8640000000000000
+    ),
+    commit_sequence INTEGER NOT NULL UNIQUE CHECK (
+      commit_sequence >= 1 AND commit_sequence <= 9007199254740991
+    )
+  );
+
+  CREATE TABLE storage_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    last_commit_sequence INTEGER NOT NULL CHECK (
+      last_commit_sequence >= 0 AND
+      last_commit_sequence <= 9007199254740991
+    )
+  );
+
+  CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY,
+    checksum TEXT NOT NULL CHECK (length(checksum) > 0)
+  );
+`
+
+const migrateLegacySingletonSql = `
+  ${createCurrentSchemaSql}
+
+  INSERT INTO current_sessions (
+    session_id,
+    protocol_version,
+    project_identity,
+    activity,
+    evidence_source,
+    state_tag,
+    freshness,
+    source_updated_at_ms,
+    observed_at_ms,
+    commit_sequence
+  )
+  SELECT
+    session_id,
+    protocol_version,
+    project_identity,
+    activity,
+    evidence_source,
+    state_tag,
+    freshness,
+    source_updated_at_ms,
+    observed_at_ms,
+    commit_sequence
+  FROM current_session
+  WHERE singleton = 1;
+
+  INSERT INTO storage_state (singleton, last_commit_sequence)
+  SELECT 1, COALESCE(MAX(commit_sequence), 0)
+  FROM current_sessions;
+
+  DROP TABLE current_session;
+`
+
+const currentMigration = {
+  version: 2,
+  checksum: createHash("sha256")
+    .update(migrateLegacySingletonSql)
+    .digest("hex"),
+} as const
+
+const storageMigrations = [currentMigration] as const
+
+const inspectStorageSchema = Effect.fn("SessionStorage.inspectSchema")(
+  function* (database: DatabaseSync) {
+    const rows = yield* Effect.try({
+      try: () =>
+        database
+          .prepare(`
+            SELECT name
+            FROM sqlite_schema
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+          `)
+          .all(),
+      catch: () => storageError("SessionStorage.open"),
+    })
+    const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(TableNameRow), {
+      onExcessProperty: "error",
+    })(rows).pipe(
+      Effect.mapError(() => storageError("SessionStorage.open")),
+    )
+    const names = decoded.map((row) => row.name)
+
+    if (names.length === 0) return "fresh"
+    if (names.length === 1 && names[0] === "current_session") {
+      return "legacy-singleton"
+    }
+    if (
+      names.length === 3 &&
+      names[0] === "current_sessions" &&
+      names[1] === "schema_migrations" &&
+      names[2] === "storage_state"
+    ) {
+      return "current"
+    }
+    return yield* storageError("SessionStorage.open")
+  },
+)
+
+const runSchemaTransaction = (
+  database: DatabaseSync,
+  body: () => void,
+): Effect.Effect<void, SessionStorageError> =>
+  Effect.try({
+    try: () => {
+      database.exec("BEGIN IMMEDIATE")
+      try {
+        body()
+        database.exec("COMMIT")
+      } catch (error) {
+        try {
+          database.exec("ROLLBACK")
+        } catch {
+          // The original migration failure is the truthful storage result.
+        }
+        throw error
+      }
+    },
+    catch: () => storageError("SessionStorage.open"),
+  })
+
+const recordCurrentMigration = (database: DatabaseSync): void => {
+  database
+    .prepare("INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)")
+    .run(currentMigration.version, currentMigration.checksum)
+}
+
+const initializeFreshSchema = (database: DatabaseSync) =>
+  runSchemaTransaction(database, () => {
+    database.exec(createCurrentSchemaSql)
+    database
+      .prepare(`
+        INSERT INTO storage_state (singleton, last_commit_sequence)
+        VALUES (1, 0)
+      `)
+      .run()
+    recordCurrentMigration(database)
+  })
+
+const migrateLegacySingleton = (
+  database: DatabaseSync,
+  path: string,
+) =>
+  Effect.gen(function* () {
+    yield* Effect.tryPromise({
+      try: () => backup(database, `${path}.pre-migration-v2.sqlite`),
+      catch: () => storageError("SessionStorage.open"),
+    })
+    yield* runSchemaTransaction(database, () => {
+      database.exec(migrateLegacySingletonSql)
+      recordCurrentMigration(database)
+    })
+  })
+
+const validateLegacySingleton = Effect.fn(
+  "SessionStorage.validateLegacySingleton",
+)(function* (database: DatabaseSync) {
+  const rows = yield* Effect.try({
+    try: () =>
+      database
+        .prepare(`
+          SELECT
+            singleton,
+            protocol_version,
+            session_id,
+            project_identity,
+            activity,
+            evidence_source,
+            state_tag,
+            freshness,
+            source_updated_at_ms,
+            observed_at_ms,
+            commit_sequence
+          FROM current_session
+        `)
+        .all(),
+    catch: () => storageError("SessionStorage.open"),
+  })
+  const decoded = yield* Schema.decodeUnknownEffect(
+    Schema.Array(LegacySessionRow),
+    { onExcessProperty: "error" },
+  )(rows).pipe(
+    Effect.mapError(() => storageError("SessionStorage.open")),
+  )
+  if (decoded.length > 1) {
+    return yield* storageError("SessionStorage.open")
+  }
+})
+
+const verifyCurrentMigration = Effect.fn("SessionStorage.verifyMigration")(
+  function* (database: DatabaseSync) {
+    const rows = yield* Effect.try({
+      try: () =>
+        database
+          .prepare("SELECT version, checksum FROM schema_migrations ORDER BY version")
+          .all(),
+      catch: () => storageError("SessionStorage.open"),
+    })
+    const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(MigrationRow), {
+      onExcessProperty: "error",
+    })(rows).pipe(
+      Effect.mapError(() => storageError("SessionStorage.open")),
+    )
+    if (
+      decoded.length !== storageMigrations.length ||
+      decoded[0]?.version !== currentMigration.version ||
+      decoded[0].checksum !== currentMigration.checksum
+    ) {
+      return yield* storageError("SessionStorage.open")
+    }
+  },
+)
+
+const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
+  function* (database: DatabaseSync, path: string) {
+    const schema = yield* inspectStorageSchema(database)
+    if (schema === "fresh") {
+      yield* initializeFreshSchema(database)
+      return
+    }
+    if (schema === "legacy-singleton") {
+      yield* validateLegacySingleton(database)
+      yield* migrateLegacySingleton(database, path)
+      return
+    }
+    yield* verifyCurrentMigration(database)
+  },
+)
+
+const openConfiguredDatabase = (path: string) =>
   Effect.try({
     try: () => {
       const database = new DatabaseSync(path, {
@@ -210,29 +581,6 @@ const openDatabase = (path: string) =>
         database.exec("PRAGMA synchronous = FULL")
         database.exec("PRAGMA busy_timeout = 2000")
         database.exec("PRAGMA trusted_schema = OFF")
-        database.exec(`
-          CREATE TABLE IF NOT EXISTS current_session (
-            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-            protocol_version INTEGER NOT NULL CHECK (protocol_version = 1),
-            session_id TEXT NOT NULL,
-            project_identity TEXT NOT NULL,
-            activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
-            evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
-            state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
-            freshness TEXT NOT NULL CHECK (freshness = 'fresh'),
-            source_updated_at_ms INTEGER NOT NULL CHECK (
-              source_updated_at_ms >= 0 AND
-              source_updated_at_ms <= 8640000000000000
-            ),
-            observed_at_ms INTEGER NOT NULL CHECK (
-              observed_at_ms >= 0 AND
-              observed_at_ms <= 8640000000000000
-            ),
-            commit_sequence INTEGER NOT NULL CHECK (
-              commit_sequence >= 1 AND commit_sequence <= 9007199254740991
-            )
-          )
-        `)
 
         const settings = database
           .prepare(`
@@ -268,6 +616,19 @@ const openDatabase = (path: string) =>
     catch: () => storageError("SessionStorage.open"),
   })
 
+const openDatabase = (path: string) =>
+  Effect.gen(function* () {
+    const database = yield* openConfiguredDatabase(path)
+    return yield* prepareStorageSchema(database, path).pipe(
+      Effect.as(database),
+      Effect.onError(() =>
+        Effect.sync(() => {
+          database.close()
+        }).pipe(Effect.ignore),
+      ),
+    )
+  })
+
 const decodeRow = (row: unknown) =>
   Schema.decodeUnknownEffect(SessionRow, { onExcessProperty: "error" })(row).pipe(
     Effect.mapError(() => storageError("SessionStorage.decodeRow")),
@@ -290,6 +651,45 @@ const decodeRow = (row: unknown) =>
     ),
   )
 
+const decodeCommitInput = Effect.fn("SessionStorage.decodeCommitInput")(
+  function* (
+    expectedPreviousCommitSequence: number,
+    changedViews: ReadonlyArray<SessionView>,
+  ) {
+    const expected = yield* Schema.decodeUnknownEffect(NonNegativeSafeInteger)(
+      expectedPreviousCommitSequence,
+    ).pipe(Effect.mapError(() => storageError("SessionStorage.commit")))
+    const views = yield* Schema.decodeUnknownEffect(Schema.Array(SessionView), {
+      onExcessProperty: "error",
+    })(changedViews).pipe(
+      Effect.mapError(() => storageError("SessionStorage.commit")),
+    )
+
+    const identities = new Set<string>()
+    for (const view of views) {
+      if (identities.has(view.sessionId)) {
+        return yield* storageError("SessionStorage.commit")
+      }
+      identities.add(view.sessionId)
+    }
+
+    const ordered = [...views].sort(
+      (left, right) => left.commitSequence - right.commitSequence,
+    )
+    for (const [index, view] of ordered.entries()) {
+      if (view.commitSequence !== expected + index + 1) {
+        return yield* storageError("SessionStorage.commit")
+      }
+    }
+    const next = expected + ordered.length
+    yield* Schema.decodeUnknownEffect(NonNegativeSafeInteger)(next).pipe(
+      Effect.mapError(() => storageError("SessionStorage.commit")),
+    )
+
+    return { expected, next, views: ordered }
+  },
+)
+
 export const layer = (path: string) =>
   Layer.effect(
     Service,
@@ -298,50 +698,111 @@ export const layer = (path: string) =>
     ).pipe(
       Effect.map((database) => {
         const load = Effect.fn("SessionStorage.load")(function* () {
-          const row = yield* Effect.try({
-            try: () =>
-              database.prepare("SELECT * FROM current_session WHERE singleton = 1").get(),
+          const result = yield* Effect.try({
+            try: () => {
+              database.exec("BEGIN")
+              try {
+                const snapshot = {
+                  rows: database
+                    .prepare(`
+                      SELECT *
+                      FROM current_sessions
+                      ORDER BY session_id COLLATE BINARY
+                    `)
+                    .all(),
+                  state: database
+                    .prepare(`
+                      SELECT singleton, last_commit_sequence
+                      FROM storage_state
+                      WHERE singleton = 1
+                    `)
+                    .get(),
+                }
+                database.exec("COMMIT")
+                return snapshot
+              } catch (error) {
+                try {
+                  database.exec("ROLLBACK")
+                } catch {
+                  // The original read failure is the truthful storage result.
+                }
+                throw error
+              }
+            },
             catch: () => storageError("SessionStorage.load"),
           })
+          const state = yield* Schema.decodeUnknownEffect(StorageStateRow, {
+            onExcessProperty: "error",
+          })(result.state).pipe(
+            Effect.mapError(() => storageError("SessionStorage.decodeRow")),
+          )
+          const views = yield* Effect.forEach(result.rows, decodeRow)
+          if (
+            views.some(
+              (view) => view.commitSequence > state.last_commit_sequence,
+            )
+          ) {
+            return yield* storageError("SessionStorage.decodeRow")
+          }
 
-          return row === undefined ? Option.none() : Option.some(yield* decodeRow(row))
+          return {
+            views,
+            lastCommitSequence: state.last_commit_sequence,
+          }
         })
 
-        const commit = Effect.fn("SessionStorage.commit")(function* (view: SessionView) {
+        const commit = Effect.fn("SessionStorage.commit")(function* (
+          expectedPreviousCommitSequence: number,
+          changedViews: ReadonlyArray<SessionView>,
+        ) {
+          const input = yield* decodeCommitInput(
+            expectedPreviousCommitSequence,
+            changedViews,
+          )
+
           yield* Effect.try({
             try: () => {
               database.exec("BEGIN IMMEDIATE")
               try {
-                database
+                const allocation = database
                   .prepare(`
-                    INSERT INTO current_session (
-                      singleton,
-                      protocol_version,
-                      session_id,
-                      project_identity,
-                      activity,
-                      evidence_source,
-                      state_tag,
-                      freshness,
-                      source_updated_at_ms,
-                      observed_at_ms,
-                      commit_sequence
-                    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(singleton) DO UPDATE SET
-                      protocol_version = excluded.protocol_version,
-                      session_id = excluded.session_id,
-                      project_identity = excluded.project_identity,
-                      activity = excluded.activity,
-                      evidence_source = excluded.evidence_source,
-                      state_tag = excluded.state_tag,
-                      freshness = excluded.freshness,
-                      source_updated_at_ms = excluded.source_updated_at_ms,
-                      observed_at_ms = excluded.observed_at_ms,
-                      commit_sequence = excluded.commit_sequence
+                    UPDATE storage_state
+                    SET last_commit_sequence = ?
+                    WHERE singleton = 1 AND last_commit_sequence = ?
                   `)
-                  .run(
-                    view.protocolVersion,
+                  .run(input.next, input.expected)
+                if (allocation.changes !== 1) {
+                  throw new Error("PackWalk commit sequence changed")
+                }
+
+                const upsert = database.prepare(`
+                  INSERT INTO current_sessions (
+                    session_id,
+                    protocol_version,
+                    project_identity,
+                    activity,
+                    evidence_source,
+                    state_tag,
+                    freshness,
+                    source_updated_at_ms,
+                    observed_at_ms,
+                    commit_sequence
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(session_id) DO UPDATE SET
+                    protocol_version = excluded.protocol_version,
+                    project_identity = excluded.project_identity,
+                    activity = excluded.activity,
+                    evidence_source = excluded.evidence_source,
+                    state_tag = excluded.state_tag,
+                    freshness = excluded.freshness,
+                    source_updated_at_ms = excluded.source_updated_at_ms,
+                    observed_at_ms = excluded.observed_at_ms,
+                    commit_sequence = excluded.commit_sequence
+                `)
+                for (const view of input.views) {
+                  upsert.run(
                     view.sessionId,
+                    view.protocolVersion,
                     view.projectIdentity,
                     view.activity,
                     view.evidenceSource,
@@ -351,6 +812,7 @@ export const layer = (path: string) =>
                     view.observedAtMs,
                     view.commitSequence,
                   )
+                }
                 database.exec("COMMIT")
               } catch (error) {
                 try {

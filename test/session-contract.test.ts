@@ -26,10 +26,17 @@ const discovered = SessionView.make({
   commitSequence: 1,
 })
 
+const secondSessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+const secondDiscovered = SessionView.make({
+  ...discovered,
+  sessionId: SessionIdentity.make(secondSessionId),
+  commitSequence: 2,
+})
+
 const decodeStrict = <S extends Schema.Constraint>(schema: S) =>
   Schema.decodeUnknownEffect(schema, { onExcessProperty: "error" })
 
-it.effect("decodes every Ticket 01 IPC event and state variant", () =>
+it.effect("decodes the legacy singleton and current overview IPC variants", () =>
   Effect.gen(function* () {
     const inputs = [
       SessionEvent.cases.SessionSnapshot.make({
@@ -61,6 +68,24 @@ it.effect("decodes every Ticket 01 IPC event and state variant", () =>
         code: "storage-unavailable",
         message: "PackWalk could not commit its current session view",
       }),
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 2,
+        views: [discovered, secondDiscovered],
+      }),
+      SessionEvent.cases.SessionsUpdated.make({
+        protocolVersion: 2,
+        views: [
+          SessionView.make({
+            ...discovered,
+            state: SessionState.cases.Polled.make({}),
+            sourceUpdatedAtMs: 2_500,
+            observedAtMs: 3_000,
+            commitSequence: 3,
+          }),
+          secondDiscovered,
+        ],
+        changedSessionIds: [SessionIdentity.make(sessionId)],
+      }),
     ]
 
     for (const input of inputs) {
@@ -73,6 +98,12 @@ it.effect("decodes every Ticket 01 IPC event and state variant", () =>
       protocolVersion: 1,
     })
     expect(command._tag).toBe("SubscribeSession")
+
+    const overviewCommand = yield* decodeStrict(SessionCommand)({
+      _tag: "SubscribeSessions",
+      protocolVersion: 2,
+    })
+    expect(overviewCommand._tag).toBe("SubscribeSessions")
   }),
 )
 
@@ -106,6 +137,35 @@ it.effect("fails closed on unknown, version-mismatched, or content-bearing IPC v
         protocolVersion: 1,
         view: { ...discovered, commitSequence: Number.MAX_SAFE_INTEGER + 1 },
       },
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 1,
+        views: [discovered, secondDiscovered],
+      },
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [discovered, { ...secondDiscovered, sessionId }],
+      },
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [discovered, { ...secondDiscovered, commitSequence: 1 }],
+      },
+      {
+        _tag: "SessionsUpdated",
+        protocolVersion: 2,
+        views: [discovered, secondDiscovered],
+        changedSessionIds: [],
+      },
+      {
+        _tag: "SessionsUpdated",
+        protocolVersion: 2,
+        views: [discovered, secondDiscovered],
+        changedSessionIds: [
+          "019f77d2-1a10-7cf0-b5df-76eebb4071ad",
+        ],
+      },
     ]
 
     for (const input of invalidInputs) {
@@ -121,6 +181,7 @@ it.effect("fails closed on unknown, version-mismatched, or content-bearing IPC v
         protocolVersion: 1,
         prompt: forbidden,
       },
+      { _tag: "SubscribeSessions", protocolVersion: 1 },
     ]) {
       const result = yield* decodeStrict(SessionCommand)(command).pipe(
         Effect.result,

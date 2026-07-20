@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { expectTypeOf } from "vitest"
 
 import type { ProjectIdentityResolver } from "../src/adapters/project-identity.js"
@@ -71,7 +71,7 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
       rawProjectIdentity,
     )
 
-    yield* storage.commit(
+    yield* storage.commit(0, [
       SessionView.make({
         protocolVersion: 1,
         sessionId,
@@ -84,11 +84,11 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
         observedAtMs: 2_000,
         commitSequence: 1,
       }),
-    )
+    ])
 
     const database = new DatabaseSync(path, { readOnly: true })
     const row = database
-      .prepare("SELECT session_id, project_identity FROM current_session")
+      .prepare("SELECT session_id, project_identity FROM current_sessions")
       .get()
     database.close()
     expect(row).toEqual({
@@ -97,12 +97,14 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
     })
 
     const loaded = yield* storage.load()
-    if (Option.isNone(loaded)) {
+    const loadedView = loaded.views[0]
+    if (loadedView === undefined) {
       return yield* Effect.die("Expected one stored session view")
     }
-    expectTypeOf(loaded.value.sessionId).toEqualTypeOf<SessionIdentityValue>()
-    expectTypeOf(loaded.value.projectIdentity).toEqualTypeOf<ProjectIdentityValue>()
-    expect(loaded.value.sessionId).toBe(rawSessionIdentity)
-    expect(loaded.value.projectIdentity).toBe(rawProjectIdentity)
+    expectTypeOf(loadedView.sessionId).toEqualTypeOf<SessionIdentityValue>()
+    expectTypeOf(loadedView.projectIdentity).toEqualTypeOf<ProjectIdentityValue>()
+    expect(loadedView.sessionId).toBe(rawSessionIdentity)
+    expect(loadedView.projectIdentity).toBe(rawProjectIdentity)
+    expect(loaded.lastCommitSequence).toBe(1)
   }),
 )

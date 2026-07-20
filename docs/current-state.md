@@ -56,10 +56,11 @@ discovered identity. Separately, second-only CLI timestamps could render
 distinct subsecond polling commits identically. Polling remains delayed
 persisted observation rather than trustworthy live or real-time attachment.
 
-The branch now refreshes the existing one-session discovery when a CLI
-subscribes, replaces only that singleton when supported discovery identifies a
-different session, and preserves monotonic PackWalk commit order. It does not
-enumerate, display, or poll multiple sessions concurrently. The compact
+At the Ticket 01 acceptance point, the branch refreshed the existing
+one-session discovery when a CLI subscribed, replaced only that singleton when
+supported discovery identified a different session, and preserved monotonic
+PackWalk commit order. That accepted slice did not enumerate, display, or poll
+multiple sessions concurrently. The compact
 six-line table now shows project, exact session identity, activity, evidence
 source, freshness, millisecond source-update time, observation time, and honest
 state. It also retains the last committed singleton separately from a public
@@ -205,13 +206,42 @@ Linux evidence is reserved for Ticket 10. No personal maintainer acceptance is
 claimed.
 
 [Ticket 04](../.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
-is claimed on `agent/ticket-04-overlapping-sessions` from fixed integration
-point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8`. Its public-seam acceptance map
-uses a deterministic source with at least two overlapping sessions, exact
-Codex identity rather than project or label identity, isolated per-session
-polling commits, visible ambiguous-evidence failure, and explicit injected
-Windows/macOS/Linux path-comparison behavior. Restoration, history, deletion,
-live attachment, intervention, and routing remain outside this ticket.
+is implemented on `agent/ticket-04-overlapping-sessions` from fixed integration
+point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` and remains claimed while its
+review gates run. The daemon now publishes protocol-v2 complete overviews with
+exact `changedSessionIds`; the CLI presents every supported session distinctly,
+including two exact IDs in one repository with the same display label. Polling
+commits use one daemon-owned global allocator and upsert only changed exact-ID
+rows, so an update to one session leaves every other projection byte-for-byte
+unchanged. Duplicate exact source IDs fail visibly as a redacted
+`source-ambiguous` result before project resolution or arbitrary selection.
+
+The expanded SQLite schema migrates the v1 singleton transactionally after a
+SQLite-aware backup, validates legacy rows with Effect Schema before migration,
+and records the checked migration while preserving the global commit sequence.
+Project comparison has injected Windows case/separator normalization and
+case-sensitive macOS/Linux behavior; session identity remains exact on every
+platform. Deterministic acceptance crosses a two-session Codex SQLite fixture
+through the real daemon and local IPC seam into the CLI formatter. Full
+verification passes 21 files and 83 tests plus typecheck, lint, and build. The
+suite caps Vitest at four workers after default machine-wide file fan-out
+repeatedly caused `EPERM` in the existing detached process-tree cleanup; two
+consecutive complete test runs and the final verification run are green.
+
+The first compiled-product check against the machine's persistent protocol-v1
+daemon exposed an upgrade blocker: the old daemon accepted its unversioned
+endpoint and rejected the v2 subscription. The repair gives incompatible local
+session protocols distinct endpoints (`daemon-v2.sock` on Unix and a
+`packwalk-v2-*` named pipe on Windows), avoiding both an unsafe daemon kill and
+a false singleton fallback. A compiled macOS arm64 exercise left a legacy
+endpoint accepting while the v2 daemon and text/JSON clients used only the new
+endpoint. Two same-project exact IDs appeared, one source update advanced only
+its own view, the other view remained serialized-identical, all commands exited
+zero with empty stderr, and the legacy endpoint received no connections. The
+isolated exercise cleaned up its processes and data. Fresh generic code review
+and independent product preflight are again the only remaining gates.
+Restoration, history, deletion, live attachment, intervention, and routing
+remain outside Ticket 04, and no maintainer acceptance is claimed.
 
 ## Reproduce
 
@@ -222,14 +252,16 @@ npm ci
 npm run packwalk
 ```
 
-Start an ordinary Codex TUI and complete one turn before `npm run packwalk`.
-Confirm the displayed project and exact session identity, note `SOURCE UPDATED`,
-then complete another turn in that same Codex session. After Codex persists the
-activity and polling observes it, PackWalk must keep the same `SESSION`, show
-`POLLED`, and render a later `SOURCE UPDATED` value. A capable terminal with
-enough width refreshes the same six lines; narrow, non-TTY, or cursor-disabled
-output appends another complete plain-text table. Neither path is live or
-real-time observation.
+Start two ordinary Codex TUIs and complete one turn in each before
+`npm run packwalk`; using the same repository gives the strongest identity
+check. Confirm that both exact `SESSION` values appear distinctly, then note
+both `SOURCE UPDATED` values. Complete another turn in only one session. After
+Codex persists the activity and polling observes it, PackWalk must keep both
+exact identities, show a later source timestamp only for the changed row, and
+leave the other row's evidence unchanged. A capable terminal with enough width
+refreshes the complete frame; narrow, non-TTY, or cursor-disabled output
+appends another complete plain-text frame. Neither path is live or real-time
+observation.
 
 Run the complete deterministic verification with:
 
@@ -246,7 +278,6 @@ npm run test:real-codex
 
 ## Not implemented
 
-- accepted multi-session behavior beyond the one-session tracer bullet;
 - trustworthy post-launch live attachment or `watched` status;
 - deterministic ask, steer, approve, reject, or interrupt commands;
 - the persistent PackWalk action ledger;
@@ -262,9 +293,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Continue claimed Ticket 04, then Tickets 05–10 in dependency order,
-   including a
-   separate readability slice after the multi-session shape exists.
+2. Finish Ticket 04's generic review and product preflight, then continue
+   Tickets 05–10 in dependency order, including a separate readability slice.
 
 ## Fresh-agent comprehension check
 
@@ -283,6 +313,8 @@ following without inspecting old commits or another checkout:
 6. Ticket 01 is maintainer-accepted and resolved; the remaining local product
    continues through the polling, intervention-qualification, and routing
    phases without reopening its polling result.
+7. Ticket 04's implementation keeps multiple persisted sessions distinct by
+   exact Codex identity and is awaiting independent review before resolution.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote

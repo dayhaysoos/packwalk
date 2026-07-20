@@ -190,14 +190,16 @@ it.effect("queries the real public daemon IPC seam for both one-shot formats", (
     expect(textDocument).toContain(sessionId)
     expect(textDocument).toContain("DISCOVERED")
     expect(JSON.parse(jsonDocument)).toMatchObject({
-      _tag: "SessionSnapshot",
-      protocolVersion: 1,
-      view: {
-        sessionId,
-        projectIdentity: "fixture-project",
-        state: { _tag: "Discovered" },
-        commitSequence: 1,
-      },
+      _tag: "SessionsSnapshot",
+      protocolVersion: 2,
+      views: [
+        {
+          sessionId,
+          projectIdentity: "fixture-project",
+          state: { _tag: "Discovered" },
+          commitSequence: 1,
+        },
+      ],
     })
   }),
 )

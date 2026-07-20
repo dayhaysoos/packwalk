@@ -119,20 +119,22 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
 
   const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
   const event = {
-    _tag: "SessionSnapshot",
-    protocolVersion: 1,
-    view: {
-      protocolVersion: 1,
-      sessionId,
-      projectIdentity: "fixture-project",
-      activity: "persisted Codex activity",
-      evidenceSource: "codex-sqlite-thread-index",
-      state: { _tag: "Discovered" },
-      freshness: "fresh",
-      sourceUpdatedAtMs: 1_000,
-      observedAtMs: 2_000,
-      commitSequence: 1,
-    },
+    _tag: "SessionsSnapshot",
+    protocolVersion: 2,
+    views: [
+      {
+        protocolVersion: 1,
+        sessionId,
+        projectIdentity: "fixture-project",
+        activity: "persisted Codex activity",
+        evidenceSource: "codex-sqlite-thread-index",
+        state: { _tag: "Discovered" },
+        freshness: "fresh",
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 2_000,
+        commitSequence: 1,
+      },
+    ],
   }
   const sockets = new Set<Socket>()
   const activeChildren = new Set<ChildProcess>()

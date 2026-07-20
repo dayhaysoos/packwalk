@@ -26,16 +26,27 @@ import {
 } from "../../src/daemon/session-runtime.js"
 import {
   CodexPersistedFact,
+  sameSessionIdentity,
   SessionIdentity,
   type SessionEvent,
 } from "../../src/domain/session.js"
 
+interface SourceUpdate {
+  readonly sourceUpdatedAtMs: number
+}
+
+interface PersistSourceUpdate {
+  (update: SourceUpdate): Effect.Effect<void, SessionSourceError>
+  (
+    sessionId: string,
+    update: SourceUpdate,
+  ): Effect.Effect<void, SessionSourceError>
+}
+
 export interface DeterministicPackWalk {
   readonly events: Stream.Stream<SessionEvent, LocalIpcError>
   readonly lifetime: Effect.Effect<never, SessionDaemonFailure>
-  readonly persistSourceUpdate: (update: {
-    readonly sourceUpdatedAtMs: number
-  }) => Effect.Effect<void, SessionSourceError>
+  readonly persistSourceUpdate: PersistSourceUpdate
   readonly persistSourceIdentityForTest: (
     sessionId: string,
   ) => Effect.Effect<void, SessionSourceError>
@@ -61,38 +72,81 @@ const decodeFact = (input: unknown) =>
     ),
   )
 
+const sourceError = (
+  code: "unavailable" | "invalid-evidence" | "ambiguous",
+): SessionSourceError =>
+  new SessionSourceError({
+    code,
+    message:
+      code === "unavailable"
+        ? "Codex persisted evidence is unavailable"
+        : code === "ambiguous"
+          ? "Codex persisted evidence is ambiguous"
+        : "Codex persisted evidence is incompatible",
+  })
+
+const asFactInputs = (input: unknown): ReadonlyArray<unknown> =>
+  Array.isArray(input) ? input : [input]
+
 export const makeDeterministicPackWalk = (
   initial: unknown,
   options: DeterministicPackWalkOptions = {},
 ): Effect.Effect<DeterministicPackWalk, unknown, Scope.Scope> =>
   Effect.gen(function* () {
-    const factRef = yield* Ref.make<unknown>(initial)
+    const factRef = yield* Ref.make<ReadonlyArray<unknown>>(
+      asFactInputs(initial),
+    )
+    const violateExactPollIdentityForTest = yield* Ref.make(false)
     const sourceAvailable = yield* Ref.make(true)
     const directory = yield* Effect.acquireRelease(
       Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-test-"))),
       (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
     )
 
-    const read = Effect.fn("SessionSource.Test.read")(function* () {
-      return yield* Ref.get(factRef).pipe(Effect.flatMap(decodeFact))
+    const readAll = Effect.fn("SessionSource.Test.readAll")(function* () {
+      const facts = yield* Ref.get(factRef).pipe(
+        Effect.flatMap((inputs) => Effect.forEach(inputs, decodeFact)),
+      )
+      const first = facts[0]
+      if (first === undefined) return yield* sourceError("invalid-evidence")
+      return [first, ...facts.slice(1)] as const
     })
 
-    const readAvailable = Effect.fn("SessionSource.Test.readAvailable")(
-      function* () {
+    const requireAvailable = Effect.fn("SessionSource.Test.requireAvailable")(
+      function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
         const available = yield* Ref.get(sourceAvailable)
-        if (!available) {
-          return yield* new SessionSourceError({
-            code: "unavailable",
-            message: "Codex persisted evidence is unavailable",
-          })
-        }
-        return yield* read()
+        if (!available) return yield* sourceError("unavailable")
+        return yield* effect
       },
     )
 
+    const readExact = Effect.fn("SessionSource.Test.readExact")(function* (
+      sessionId: typeof SessionIdentity.Type,
+    ) {
+      const matches = (yield* readAll()).filter((fact) =>
+        sameSessionIdentity(fact.sessionId, sessionId),
+      )
+      if (matches.length === 0) {
+        const violateExactIdentity = yield* Ref.get(
+          violateExactPollIdentityForTest,
+        )
+        const mismatchedFact = (yield* readAll())[0]
+        if (violateExactIdentity && mismatchedFact !== undefined) {
+          return mismatchedFact
+        }
+        return yield* sourceError("unavailable")
+      }
+      if (matches.length > 1) return yield* sourceError("ambiguous")
+      const match = matches[0]
+      if (match === undefined) {
+        return yield* sourceError("invalid-evidence")
+      }
+      return match
+    })
+
     const source: SessionSourceInterface = {
-      discover: readAvailable,
-      poll: readAvailable,
+      discover: () => requireAvailable(readAll()),
+      poll: (sessionId) => requireAvailable(readExact(sessionId)),
     }
 
     const sourceLayer = Layer.succeed(SessionSource, SessionSource.of(source))
@@ -106,15 +160,21 @@ export const makeDeterministicPackWalk = (
               const storage = yield* SessionStorage
               return SessionStorage.of({
                 load: storage.load,
-                commit: (view) =>
-                  view.commitSequence === options.failCommitSequence
+                commit: (expectedPreviousCommitSequence, changedViews) =>
+                  changedViews.some(
+                    (view) =>
+                      view.commitSequence === options.failCommitSequence,
+                  )
                     ? Effect.fail(
                         new SessionStorageError({
                           operation: "SessionStorage.commit",
                           message: "PackWalk could not commit its current session view",
                         }),
                       )
-                    : storage.commit(view),
+                    : storage.commit(
+                        expectedPreviousCommitSequence,
+                        changedViews,
+                      ),
               })
             }),
           ).pipe(Layer.provide(realStorageLayer))
@@ -131,31 +191,69 @@ export const makeDeterministicPackWalk = (
     )
     const daemon = Context.get(daemonContext, SessionDaemon)
 
-    const persistSourceUpdate = Effect.fn("SessionSource.Test.persistUpdate")(
-      function* (update: { readonly sourceUpdatedAtMs: number }) {
-        const fact = yield* Ref.get(factRef).pipe(Effect.flatMap(decodeFact))
+    const persistSourceUpdate: PersistSourceUpdate = (
+      sessionIdOrUpdate: string | SourceUpdate,
+      exactUpdate?: SourceUpdate,
+    ) =>
+      Effect.gen(function* () {
+        const facts = yield* readAll()
+        const update =
+          typeof sessionIdOrUpdate === "string"
+            ? exactUpdate
+            : sessionIdOrUpdate
+        if (update === undefined) return yield* sourceError("invalid-evidence")
+
+        const sessionId =
+          typeof sessionIdOrUpdate === "string"
+            ? sessionIdOrUpdate
+            : facts.length === 1
+              ? facts[0]?.sessionId
+              : undefined
+        if (sessionId === undefined) {
+          return yield* sourceError(
+            facts.length > 1 ? "ambiguous" : "invalid-evidence",
+          )
+        }
+
+        const matches = facts.filter((fact) =>
+          sameSessionIdentity(fact.sessionId, sessionId),
+        )
+        if (matches.length !== 1) {
+          return yield* sourceError(
+            matches.length > 1 ? "ambiguous" : "invalid-evidence",
+          )
+        }
+
         yield* Ref.set(
           factRef,
-          CodexPersistedFact.make({
-            ...fact,
-            sourceUpdatedAtMs: update.sourceUpdatedAtMs,
-          }),
+          facts.map((fact) =>
+            sameSessionIdentity(fact.sessionId, sessionId)
+              ? CodexPersistedFact.make({
+                  ...fact,
+                  sourceUpdatedAtMs: update.sourceUpdatedAtMs,
+                })
+              : fact,
+          ),
         )
-      },
-    )
+      })
 
     const persistSourceIdentityForTest = Effect.fn(
       "SessionSource.Test.persistIdentity",
     )(function* (sessionId: string) {
-      const fact = yield* Ref.get(factRef).pipe(Effect.flatMap(decodeFact))
+      const facts = yield* readAll()
+      const fact = facts.length === 1 ? facts[0] : undefined
+      if (fact === undefined) return yield* sourceError("invalid-evidence")
       yield* Ref.set(
         factRef,
-        CodexPersistedFact.make({
-          ...fact,
-          sessionId: SessionIdentity.make(sessionId),
-          sourceUpdatedAtMs: fact.sourceUpdatedAtMs + 1,
-        }),
+        [
+          CodexPersistedFact.make({
+            ...fact,
+            sessionId: SessionIdentity.make(sessionId),
+            sourceUpdatedAtMs: fact.sourceUpdatedAtMs + 1,
+          }),
+        ],
       )
+      yield* Ref.set(violateExactPollIdentityForTest, true)
     })
 
     return {
@@ -163,7 +261,8 @@ export const makeDeterministicPackWalk = (
       lifetime: daemon.lifetime,
       persistSourceUpdate,
       persistSourceIdentityForTest,
-      persistSourceFactForTest: (fact) => Ref.set(factRef, fact),
+      persistSourceFactForTest: (fact) =>
+        Ref.set(factRef, asFactInputs(fact)),
       loseSourceForTest: Ref.set(sourceAvailable, false),
       restoreSourceForTest: Ref.set(sourceAvailable, true),
     }

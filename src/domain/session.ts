@@ -1,7 +1,7 @@
 import { Data, Option, Result, Schema } from "effect"
 
 export const MaximumIdentityBytes = 4 * 1024
-export const MaximumSessionEventBytes = 64 * 1024
+export const MaximumSessionEventBytes = 4 * 1024 * 1024
 
 const identityEncoder = new TextEncoder()
 
@@ -17,6 +17,9 @@ export const SessionIdentity = Identity.pipe(
   Schema.brand("PackWalk.SessionIdentity"),
 )
 export type SessionIdentity = typeof SessionIdentity.Type
+
+export const sameSessionIdentity = (left: string, right: string): boolean =>
+  left === right
 
 export const ProjectIdentity = Identity.pipe(
   Schema.brand("PackWalk.ProjectIdentity"),
@@ -63,8 +66,47 @@ export const SessionView = Schema.Struct({
 
 export interface SessionView extends Schema.Schema.Type<typeof SessionView> {}
 
+export const SessionViews = Schema.NonEmptyArray(SessionView).check(
+  Schema.makeFilter((views) => {
+    const identities = new Set<string>()
+    const commitSequences = new Set<number>()
+
+    for (const view of views) {
+      if (identities.has(view.sessionId)) {
+        return "session views must have unique exact session identities"
+      }
+      if (commitSequences.has(view.commitSequence)) {
+        return "session views must have unique commit identities"
+      }
+      identities.add(view.sessionId)
+      commitSequences.add(view.commitSequence)
+    }
+
+    return undefined
+  }),
+)
+
+export type SessionViews = typeof SessionViews.Type
+
+const ChangedSessionIdentities = Schema.Array(SessionIdentity).check(
+  Schema.makeFilter((identities) => {
+    const exactIdentities = new Set<string>()
+
+    for (const identity of identities) {
+      if (exactIdentities.has(identity)) {
+        return "changed session identities must be unique"
+      }
+      exactIdentities.add(identity)
+    }
+
+    return undefined
+  }),
+)
+
 const sourceUnavailableMessage =
   "PackWalk could not read supported Codex persisted evidence" as const
+const sourceAmbiguousMessage =
+  "PackWalk found ambiguous Codex persisted evidence" as const
 const storageUnavailableMessage =
   "PackWalk could not commit its current session view" as const
 
@@ -77,20 +119,46 @@ export const SessionEvent = Schema.TaggedUnion({
     protocolVersion: Schema.Literal(1),
     view: SessionView,
   },
+  SessionsSnapshot: {
+    protocolVersion: Schema.Literal(2),
+    views: SessionViews,
+  },
+  SessionsUpdated: {
+    protocolVersion: Schema.Literal(2),
+    views: SessionViews,
+    changedSessionIds: ChangedSessionIdentities,
+  },
   SessionUnavailable: {
-    protocolVersion: Schema.Literal(1),
+    protocolVersion: Schema.Literals([1, 2]),
     code: Schema.Literals([
+      "source-ambiguous",
       "source-incompatible",
       "source-unavailable",
       "storage-unavailable",
     ]),
     message: Schema.Literals([
+      sourceAmbiguousMessage,
       sourceUnavailableMessage,
       storageUnavailableMessage,
     ]),
   },
 }).check(
   Schema.makeFilter((event) => {
+    if (event._tag === "SessionsUpdated") {
+      if (event.changedSessionIds.length === 0) {
+        return "updated session overviews must name at least one changed session"
+      }
+
+      const viewIdentities = new Set(
+        event.views.map((view) => view.sessionId as string),
+      )
+      return event.changedSessionIds.every((identity) =>
+          viewIdentities.has(identity)
+        )
+        ? undefined
+        : "changed session identities must belong to the overview"
+    }
+
     if (event._tag !== "SessionUnavailable") {
       return undefined
     }
@@ -98,6 +166,8 @@ export const SessionEvent = Schema.TaggedUnion({
     const valid =
       event.code === "storage-unavailable"
         ? event.message === storageUnavailableMessage
+        : event.code === "source-ambiguous"
+          ? event.message === sourceAmbiguousMessage
         : event.message === sourceUnavailableMessage
 
     return valid
@@ -159,9 +229,14 @@ export const transitionSession = (
   fact: CodexPersistedFact,
   observedAtMs: number,
   trigger: SessionTransitionTrigger = SessionTransitionTrigger.Polling(),
+  commitSequence?: number,
 ): Result.Result<TransitionDecision, IllegalSessionTransition> => {
   if (Option.isNone(current)) {
-    const view = makeDiscoveredSessionView(fact, observedAtMs, 1)
+    const view = makeDiscoveredSessionView(
+      fact,
+      observedAtMs,
+      commitSequence ?? 1,
+    )
 
     return Result.succeed(
       TransitionDecision.Changed({
@@ -171,32 +246,12 @@ export const transitionSession = (
     )
   }
 
-  if (current.value.sessionId !== fact.sessionId) {
-    return matchSessionTransitionTrigger(trigger, {
-      Discovery: () => {
-        const view = makeDiscoveredSessionView(
-          fact,
-          observedAtMs,
-          current.value.commitSequence + 1,
-        )
-
-        return Result.succeed(
-          TransitionDecision.Changed({
-            view,
-            event: SessionEvent.cases.SessionUpdated.make({
-              protocolVersion: 1,
-              view,
-            }),
-          }),
-        )
-      },
-      Polling: () =>
-        Result.fail(
-          new IllegalSessionTransition({
-            reason: "session-identity-changed",
-          }),
-        ),
-    })
+  if (!sameSessionIdentity(current.value.sessionId, fact.sessionId)) {
+    return Result.fail(
+      new IllegalSessionTransition({
+        reason: "session-identity-changed",
+      }),
+    )
   }
 
   if (fact.sourceUpdatedAtMs < current.value.sourceUpdatedAtMs) {
@@ -219,7 +274,7 @@ export const transitionSession = (
     state: SessionState.cases.Polled.make({}),
     sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
     observedAtMs,
-    commitSequence: current.value.commitSequence + 1,
+    commitSequence: commitSequence ?? current.value.commitSequence + 1,
   })
 
   return Result.succeed(

@@ -7,6 +7,8 @@ const readFailureMessage =
   "PackWalk could not read supported Codex persisted evidence" as const
 const commitFailureMessage =
   "PackWalk could not commit its current session view" as const
+const ambiguousFailureMessage =
+  "PackWalk found ambiguous Codex persisted evidence" as const
 
 const decode = Schema.decodeUnknownEffect(SessionEvent, {
   onExcessProperty: "error",
@@ -32,6 +34,12 @@ it.effect("round-trips every valid unavailable code and message pair", () =>
         protocolVersion: 1,
         code: "storage-unavailable",
         message: commitFailureMessage,
+      },
+      {
+        _tag: "SessionUnavailable",
+        protocolVersion: 2,
+        code: "source-ambiguous",
+        message: ambiguousFailureMessage,
       },
     ] as const
 
@@ -63,6 +71,18 @@ it.effect("rejects every mismatched unavailable code and message pair", () =>
         protocolVersion: 1,
         code: "storage-unavailable",
         message: readFailureMessage,
+      },
+      {
+        _tag: "SessionUnavailable",
+        protocolVersion: 2,
+        code: "source-ambiguous",
+        message: readFailureMessage,
+      },
+      {
+        _tag: "SessionUnavailable",
+        protocolVersion: 2,
+        code: "source-unavailable",
+        message: ambiguousFailureMessage,
       },
     ] as const
 

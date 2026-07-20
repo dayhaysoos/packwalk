@@ -19,6 +19,7 @@ import {
   runSessionEventServer,
 } from "../src/adapters/local-session-ipc.js"
 import {
+  MaximumSessionEventBytes,
   ProjectIdentity,
   SessionEvent,
   SessionIdentity,
@@ -136,12 +137,14 @@ const receiveOneEvent = (endpoint: string) =>
 const snapshotBytes = (projectIdentity: string): Uint8Array =>
   Buffer.from(
     `${JSON.stringify(
-      SessionEvent.cases.SessionSnapshot.make({
-        protocolVersion: 1,
-        view: SessionView.make({
-          ...view,
-          projectIdentity: ProjectIdentity.make(projectIdentity),
-        }),
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 2,
+        views: [
+          SessionView.make({
+            ...view,
+            projectIdentity: ProjectIdentity.make(projectIdentity),
+          }),
+        ],
       }),
     )}\n`,
     "utf8",
@@ -155,19 +158,22 @@ it.effect("encodes and decodes the public session event stream across local IPC"
     )
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
-      SessionEvent.cases.SessionSnapshot.make({
-        protocolVersion: 1,
-        view,
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 2,
+        views: [view],
       }),
-      SessionEvent.cases.SessionUpdated.make({
-        protocolVersion: 1,
-        view: SessionView.make({
-          ...view,
-          state: SessionState.cases.Polled.make({}),
-          sourceUpdatedAtMs: 2_500,
-          observedAtMs: 3_000,
-          commitSequence: 2,
-        }),
+      SessionEvent.cases.SessionsUpdated.make({
+        protocolVersion: 2,
+        views: [
+          SessionView.make({
+            ...view,
+            state: SessionState.cases.Polled.make({}),
+            sourceUpdatedAtMs: 2_500,
+            observedAtMs: 3_000,
+            commitSequence: 2,
+          }),
+        ],
+        changedSessionIds: [SessionIdentity.make(sessionId)],
       }),
     )
 
@@ -240,8 +246,9 @@ it.live("preserves a UTF-8 code point split across IPC chunks", () =>
 
     expect(received).toHaveLength(1)
     expect(received[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: { projectIdentity },
+      _tag: "SessionsSnapshot",
+      protocolVersion: 2,
+      views: [{ projectIdentity }],
     })
   }),
 )
@@ -255,7 +262,7 @@ it.live("rejects an oversized IPC frame before its newline arrives", () =>
     const endpoint = makeEndpoint(directory)
 
     yield* makeRawEventServer(endpoint, [
-      Buffer.alloc(64 * 1024 + 1, 0x61),
+      Buffer.alloc(MaximumSessionEventBytes + 1, 0x61),
     ])
     const result = yield* receiveOneEvent(endpoint).pipe(Effect.result)
 
@@ -271,9 +278,9 @@ it.live("continues serving after a peer disconnects before subscribing", () =>
     )
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
-      SessionEvent.cases.SessionSnapshot.make({
-        protocolVersion: 1,
-        view,
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 2,
+        views: [view],
       }),
     )
     const server = yield* makeSessionEventServer(endpoint)
@@ -296,9 +303,9 @@ it.live("closes a malformed-command peer and continues serving", () =>
     )
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
-      SessionEvent.cases.SessionSnapshot.make({
-        protocolVersion: 1,
-        view,
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 2,
+        views: [view],
       }),
     )
     const server = yield* makeSessionEventServer(endpoint)

@@ -12,6 +12,7 @@ import { Deferred, Effect, Fiber, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import {
+  formatSessionEvent,
   runSessionClient,
   type ClientPort,
 } from "../src/client/session-client.js"
@@ -47,8 +48,9 @@ it.effect("reports the repository root for Codex working directories inside ordi
       )
 
       expect(events[0]).toMatchObject({
-        _tag: "SessionSnapshot",
-        view: { projectIdentity: repositoryRoot },
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [{ projectIdentity: repositoryRoot }],
       })
     }
   }),
@@ -74,8 +76,9 @@ it.effect("preserves the exact Codex working directory when no repository marker
     )
 
     expect(events[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: { projectIdentity: workingDirectory },
+      _tag: "SessionsSnapshot",
+      protocolVersion: 2,
+      views: [{ projectIdentity: workingDirectory }],
     })
   }),
 )
@@ -100,30 +103,37 @@ it.effect("discovers and polls one content-free session from the Codex SQLite th
     )
 
     yield* Deferred.await(firstObserved)
-    yield* packWalk.persistCodexActivity(2_500)
+    yield* packWalk.persistCodexActivity(sessionId, 2_500)
     yield* TestClock.adjust("1 second")
 
     const events = Array.from(yield* Fiber.join(collected))
 
     expect(events.map((event) => event._tag)).toEqual([
-      "SessionSnapshot",
-      "SessionUpdated",
+      "SessionsSnapshot",
+      "SessionsUpdated",
     ])
     expect(events[0]).toMatchObject({
-      view: {
-        sessionId,
-        projectIdentity: "fixture-project",
-        sourceUpdatedAtMs: 1_000,
-        commitSequence: 1,
-      },
+      protocolVersion: 2,
+      views: [
+        {
+          sessionId,
+          projectIdentity: "fixture-project",
+          sourceUpdatedAtMs: 1_000,
+          commitSequence: 1,
+        },
+      ],
     })
     expect(events[1]).toMatchObject({
-      view: {
-        sessionId,
-        projectIdentity: "fixture-project",
-        sourceUpdatedAtMs: 2_500,
-        commitSequence: 2,
-      },
+      protocolVersion: 2,
+      changedSessionIds: [sessionId],
+      views: [
+        {
+          sessionId,
+          projectIdentity: "fixture-project",
+          sourceUpdatedAtMs: 2_500,
+          commitSequence: 2,
+        },
+      ],
     })
     expect(JSON.stringify(events)).not.toContain(forbidden)
   }),
@@ -156,7 +166,7 @@ it.effect("renders one later persisted Codex update as a complete CLI frame thro
     ).pipe(Effect.forkChild)
 
     yield* Deferred.await(firstRendered)
-    yield* packWalk.persistCodexActivity(2_500)
+    yield* packWalk.persistCodexActivity(sessionId, 2_500)
     yield* TestClock.adjust("1 second")
     yield* Fiber.join(rendering)
 
@@ -181,7 +191,7 @@ it.effect("renders one later persisted Codex update as a complete CLI frame thro
   }),
 )
 
-it.effect("refreshes the one current session when a later CLI subscribes", () =>
+it.effect("adds a newly discovered identity without replacing the stored exact session", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
     const replacementSessionId =
@@ -197,11 +207,12 @@ it.effect("refreshes the one current session when a later CLI subscribes", () =>
       yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
     )
     expect(first[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: { sessionId, projectIdentity: "first-project" },
+      _tag: "SessionsSnapshot",
+      protocolVersion: 2,
+      views: [{ sessionId, projectIdentity: "first-project" }],
     })
 
-    yield* packWalk.replaceCodexSession({
+    yield* packWalk.replaceCodexSession(sessionId, {
       sessionId: replacementSessionId,
       projectIdentity: "replacement-project",
       sourceUpdatedAtMs: 2_500,
@@ -212,16 +223,67 @@ it.effect("refreshes the one current session when a later CLI subscribes", () =>
       yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
     )
     expect(reconnected[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: {
-        sessionId: replacementSessionId,
-        projectIdentity: "replacement-project",
-        state: { _tag: "Discovered" },
-        sourceUpdatedAtMs: 2_500,
-        observedAtMs: 3_000,
-        commitSequence: 2,
-      },
+      _tag: "SessionsSnapshot",
+      protocolVersion: 2,
+      views: [
+        {
+          sessionId,
+          projectIdentity: "first-project",
+          state: { _tag: "Discovered" },
+          sourceUpdatedAtMs: 1_000,
+          observedAtMs: 2_000,
+          commitSequence: 1,
+        },
+        {
+          sessionId: replacementSessionId,
+          projectIdentity: "replacement-project",
+          state: { _tag: "Discovered" },
+          sourceUpdatedAtMs: 2_500,
+          observedAtMs: 3_000,
+          commitSequence: 2,
+        },
+      ],
     })
+  }),
+)
+
+it.effect("rejects duplicate exact Codex session identities before selecting a row", () =>
+  Effect.gen(function* () {
+    const forbidden = "conflicting-source-detail"
+    const packWalk = yield* makeCodexIndexedPackWalk([
+      {
+        sessionId,
+        projectIdentity: `first-project-${forbidden}`,
+        sourceUpdatedAtMs: 1_000,
+        forbiddenContent: `${forbidden}-first`,
+      },
+      {
+        sessionId,
+        projectIdentity: `second-project-${forbidden}`,
+        sourceUpdatedAtMs: 2_000,
+        forbiddenContent: `${forbidden}-second`,
+      },
+    ])
+
+    const events = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+
+    expect(events).toEqual([
+      {
+        _tag: "SessionUnavailable",
+        protocolVersion: 2,
+        code: "source-ambiguous",
+        message: "PackWalk found ambiguous Codex persisted evidence",
+      },
+    ])
+    const event = events[0]
+    if (event === undefined) {
+      return yield* Effect.die("Expected an ambiguous source event")
+    }
+    expect(formatSessionEvent(event).join("\n")).toContain("UNAVAILABLE")
+    expect(JSON.stringify(events)).not.toContain(sessionId)
+    expect(JSON.stringify(events)).not.toContain(forbidden)
   }),
 )
 
@@ -282,7 +344,7 @@ it.effect("rejects Codex rows whose structural identity or timestamp is incompat
       expect(events).toHaveLength(1)
       expect(events[0]).toMatchObject({
         _tag: "SessionUnavailable",
-        protocolVersion: 1,
+        protocolVersion: 2,
         message: "PackWalk could not read supported Codex persisted evidence",
       })
       if (events[0]?._tag === "SessionUnavailable") {

@@ -94,23 +94,76 @@ const formatDetails = (
   ]),
 ]
 
+const sessionFrameFields = (view: SessionView): SessionFrameFields => ({
+  project: escapeTerminalText(projectName(view.projectIdentity)),
+  state: view.state._tag.toUpperCase(),
+  activity: view.activity,
+  session: escapeTerminalText(view.sessionId),
+  evidence: view.evidenceSource,
+  freshness: view.freshness,
+  sourceUpdated: utcTimestamp(view.sourceUpdatedAtMs),
+  observed: utcTimestamp(view.observedAtMs),
+})
+
+const formatSessionViews = (
+  views: ReadonlyArray<SessionView>,
+): ReadonlyArray<string> => {
+  if (views.length === 1) {
+    const view = views[0]
+    return view === undefined ? [] : formatDetails(sessionFrameFields(view))
+  }
+
+  const fields = views.map(sessionFrameFields)
+  return [
+    formatColumns([
+      ["PROJECT", projectWidth],
+      ["STATE", stateWidth],
+      ["ACTIVITY"],
+    ]),
+    ...fields.map((field) =>
+      formatColumns([
+        [field.project, projectWidth],
+        [field.state, stateWidth],
+        [field.activity],
+      ]),
+    ),
+    formatColumns([
+      ["SESSION", sessionWidth],
+      ["EVIDENCE", evidenceWidth],
+      ["FRESHNESS"],
+    ]),
+    ...fields.map((field) =>
+      formatColumns([
+        [field.session, sessionWidth],
+        [field.evidence, evidenceWidth],
+        [field.freshness],
+      ]),
+    ),
+    formatColumns([
+      ["SOURCE UPDATED", sourceUpdatedWidth],
+      ["OBSERVED"],
+    ]),
+    ...fields.map((field) =>
+      formatColumns([
+        [field.sourceUpdated, sourceUpdatedWidth],
+        [field.observed],
+      ]),
+    ),
+  ]
+}
+
 export const formatSessionView = (view: SessionView): ReadonlyArray<string> =>
-  formatDetails({
-    project: escapeTerminalText(projectName(view.projectIdentity)),
-    state: view.state._tag.toUpperCase(),
-    activity: view.activity,
-    session: escapeTerminalText(view.sessionId),
-    evidence: view.evidenceSource,
-    freshness: view.freshness,
-    sourceUpdated: utcTimestamp(view.sourceUpdatedAtMs),
-    observed: utcTimestamp(view.observedAtMs),
-  })
+  formatDetails(sessionFrameFields(view))
 
 export const formatSessionEvent = (
   event: SessionEvent,
 ): ReadonlyArray<string> => {
-  if (event._tag !== "SessionUnavailable") {
+  if (event._tag === "SessionSnapshot" || event._tag === "SessionUpdated") {
     return formatSessionView(event.view)
+  }
+
+  if (event._tag === "SessionsSnapshot" || event._tag === "SessionsUpdated") {
+    return formatSessionViews(event.views)
   }
 
   return formatDetails({

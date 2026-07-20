@@ -22,7 +22,7 @@ describe("PackWalk runtime paths", () => {
     expect(paths.packWalkDatabasePath).toBe(
       "/Users/example/Library/Application Support/PackWalk/packwalk.sqlite",
     )
-    expect(paths.ipcEndpoint).toBe("/tmp/packwalk-501/daemon.sock")
+    expect(paths.ipcEndpoint).toBe("/tmp/packwalk-501/daemon-v2.sock")
     expect(paths.ipcDirectory).toBe("/tmp/packwalk-501")
   })
 
@@ -44,7 +44,7 @@ describe("PackWalk runtime paths", () => {
       "/home/example/.data/packwalk/packwalk.sqlite",
     )
     expect(paths.ipcEndpoint).toBe(
-      "/run/user/1000/packwalk-1000/daemon.sock",
+      "/run/user/1000/packwalk-1000/daemon-v2.sock",
     )
   })
 
@@ -62,7 +62,7 @@ describe("PackWalk runtime paths", () => {
       "D:\\LocalData\\PackWalk\\packwalk.sqlite",
     )
     expect(paths.ipcEndpoint).toMatch(
-      /^\\\\\.\\pipe\\packwalk-[a-f0-9]{16}$/,
+      /^\\\\\.\\pipe\\packwalk-v2-[a-f0-9]{16}$/,
     )
     expect(paths.ipcDirectory).toBeUndefined()
   })

@@ -31,6 +31,10 @@ export interface RuntimePathsValue {
   readonly ipcEndpoint: string
 }
 
+// Incompatible command/event protocols use distinct endpoints so a newly
+// installed client cannot silently connect to a persistent older daemon.
+const sessionIpcNamespace = "v2"
+
 const stableUserToken = (input: RuntimePathInputs): string =>
   input.userId ??
   createHash("sha256")
@@ -73,7 +77,7 @@ export const deriveRuntimePaths = (
         packWalkDataDirectory,
         "packwalk.sqlite",
       ),
-      ipcEndpoint: `\\\\.\\pipe\\packwalk-${stableUserToken(input)}`,
+      ipcEndpoint: `\\\\.\\pipe\\packwalk-${sessionIpcNamespace}-${stableUserToken(input)}`,
     }
   }
 
@@ -99,7 +103,10 @@ export const deriveRuntimePaths = (
       "packwalk.sqlite",
     ),
     ipcDirectory,
-    ipcEndpoint: posix.join(ipcDirectory, "daemon.sock"),
+    ipcEndpoint: posix.join(
+      ipcDirectory,
+      `daemon-${sessionIpcNamespace}.sock`,
+    ),
   }
 }
 

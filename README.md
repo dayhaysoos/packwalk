@@ -9,10 +9,11 @@ without owning the lifecycle of the Codex sessions it assists.
 ## Status
 
 PackWalk's accepted first implementation is a read-only polling slice. It
-discovers one existing Codex session, persists a content-free current view,
-exposes it through the PackWalk daemon, and displays polling updates in a plain
-command-line view. It does not yet establish trustworthy live attachment or
-perform a consequential action.
+discovers supported existing Codex sessions, persists a content-free
+multi-session overview, exposes it through the PackWalk daemon, and displays
+polling updates in a plain command-line view without mixing exact identities.
+It does not yet establish trustworthy live attachment or perform a
+consequential action.
 
 Read-only behavior is the current delivery state, not PackWalk's permanent
 product boundary. The intended local product progresses from truthful
@@ -59,9 +60,9 @@ repository, then install the exact lockfile once:
 npm ci
 ```
 
-Start at least one ordinary Codex TUI independently, before PackWalk, and
-complete one turn so its supported persisted record is current. From this
-repository, start the continuously refreshing view with:
+Start one or more ordinary Codex TUIs independently, before PackWalk, and
+complete a turn in each so their supported persisted records are current. From
+this repository, start the continuously refreshing view with:
 
 ```sh
 npm run packwalk
@@ -69,16 +70,19 @@ npm run packwalk
 
 That command builds the package binary, starts or connects to the PackWalk
 daemon automatically, and opens the plain CLI view. Do not start a separate
-daemon. The six-line table shows project, exact Codex session identity,
-supported activity, evidence source, freshness, millisecond source-update time,
-PackWalk observation time, and honest state. Note the `SESSION` and
-`SOURCE UPDATED` values, then complete another turn in that same Codex session.
-After Codex
-persists the change and polling observes it, PackWalk keeps the same `SESSION`,
-shows `POLLED`, and renders a later `SOURCE UPDATED` value. A capable terminal
-with enough width refreshes the same six lines. Redirected output, a dumb
-terminal, or a terminal too narrow for the table appends each complete
-plain-text table instead. Press Ctrl-C to close the CLI; the daemon and Codex
+daemon. The view shows project, exact Codex session identity, supported
+activity, evidence source, freshness, millisecond source-update time, PackWalk
+observation time, and honest state for every supported row. A singleton keeps
+the compact six-line layout; an overview groups one row per session under each
+field heading. Exact Codex identity remains authoritative even when two rows
+share a repository or display label. Note one row's `SESSION` and `SOURCE
+UPDATED`, then complete another turn in that same Codex session. After Codex
+persists the change and polling observes it, PackWalk keeps every `SESSION`
+distinct, shows the changed row as `POLLED`, and renders its later `SOURCE
+UPDATED` value without changing the other row's committed evidence. A capable
+terminal with enough width refreshes the complete frame. Redirected output, a
+dumb terminal, or a terminal too narrow for the table appends each complete
+plain-text frame instead. Press Ctrl-C to close the CLI; the daemon and Codex
 continue independently.
 
 For one current result suitable for scrollback, screen readers, or scripts,
@@ -89,29 +93,36 @@ npm run --silent packwalk -- text
 npm run --silent packwalk -- json
 ```
 
-`text` emits the same complete six-line fields without terminal cursor
-controls. `json` emits the daemon's versioned Effect-Schema session event: an
-available result is a `SessionSnapshot` with a required `view`, while an
-unavailable source is a `SessionUnavailable` with a required redacted `code`
-and `message`. The tagged variants make unavailable session fields distinct
-from data that was merely omitted. Both commands query the daemon, write one
-document with the host platform's line ending, and exit. A snapshot or explicit
-unavailable result exits successfully; invalid arguments, connection or daemon
-failure, an empty stream, encoding failure, or output failure emits one
-redacted error to stderr and exits nonzero. Neither command reads Codex or
-PackWalk SQLite directly.
+`text` emits the same complete fields without terminal cursor controls. `json`
+emits the daemon's versioned Effect-Schema event: an available result is a
+protocol-v2 `SessionsSnapshot` with a required nonempty `views` collection,
+while an unavailable source is a `SessionUnavailable` with a required redacted
+`code` and `message`. Committed polling events are `SessionsUpdated` values
+that carry the complete overview plus exact `changedSessionIds`. The tagged
+variants make unavailable session fields distinct from data that was merely
+omitted. Both commands query the daemon, write one document with the host
+platform's line ending, and exit. A snapshot or explicit unavailable result
+exits successfully; invalid arguments, connection or daemon failure, an empty
+stream, encoding failure, or output failure emits one redacted error to stderr
+and exits nonzero. Neither command reads Codex or PackWalk SQLite directly.
+
+Protocol-v2 overview clients use a versioned per-user local endpoint. A
+persistent protocol-v1 daemon is neither killed nor mistaken for the current
+overview service, and the v2 client never falls back to its singleton result.
 
 A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live
 attachment or direct control.
 
-The maintainer accepted the corrected real-session presentation and reconnect
-recovery after one continuously running CLI kept the same exact session and
-redrew a later committed source timestamp in place. The current six-line view
-still has non-blocking visual-hierarchy feedback; a separate readability slice
-will address that after the multi-session shape exists. See [current
-state](docs/current-state.md) and [Ticket
-01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md).
+The maintainer accepted the corrected Ticket 01 real-session presentation and
+reconnect recovery after one continuously running CLI kept the same exact
+session and redrew a later committed source timestamp in place. Ticket 04 now
+implements the multi-session shape and is awaiting its independent review
+gates. The view still has non-blocking visual-hierarchy feedback for a separate
+readability slice. See [current state](docs/current-state.md), [Ticket
+01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md),
+and [Ticket
+04](.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md).
 
 ## Verify the current implementation
 
@@ -148,6 +159,7 @@ turn in Codex and does not require special Codex launch options.
 - [Active polling specification](.scratch/packwalk-post-launch-orientation/spec.md)
 - [First implementation ticket](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
 - [Text and JSON output ticket](.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
+- [Multi-session identity ticket](.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
 
 ## Source availability
 

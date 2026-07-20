@@ -21,20 +21,23 @@ import {
   replaceCodexIndexFixture,
   updateCodexIndexFixture,
   type CodexIndexFixture,
+  type CodexIndexFixtureInput,
 } from "./codex-index-fixture.js"
 
 export interface CodexIndexedPackWalk {
   readonly events: Stream.Stream<SessionEvent, LocalIpcError>
   readonly persistCodexActivity: (
+    sessionId: string,
     sourceUpdatedAtMs: number,
   ) => Effect.Effect<void, unknown>
   readonly replaceCodexSession: (
+    currentSessionId: string,
     replacement: Omit<CodexIndexFixture, "forbiddenContent">,
   ) => Effect.Effect<void, unknown>
 }
 
 export const makeCodexIndexedPackWalk = (
-  fixture: CodexIndexFixture,
+  fixtures: CodexIndexFixtureInput,
 ): Effect.Effect<CodexIndexedPackWalk, unknown, Scope.Scope> =>
   Effect.gen(function* () {
     const directory = yield* Effect.acquireRelease(
@@ -42,7 +45,7 @@ export const makeCodexIndexedPackWalk = (
       (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
     )
     const codexDatabasePath = join(directory, "state_5.sqlite")
-    yield* createCodexIndexFixture(codexDatabasePath, fixture)
+    yield* createCodexIndexFixture(codexDatabasePath, fixtures)
 
     const dependencies = Layer.mergeAll(
       codexSourceLayer(codexDatabasePath),
@@ -58,16 +61,16 @@ export const makeCodexIndexedPackWalk = (
 
     return {
       events: Stream.unwrap(connectSessionEvents(endpoint)),
-      persistCodexActivity: (sourceUpdatedAtMs) =>
+      persistCodexActivity: (sessionId, sourceUpdatedAtMs) =>
         updateCodexIndexFixture(
           codexDatabasePath,
-          fixture.sessionId,
+          sessionId,
           sourceUpdatedAtMs,
         ),
-      replaceCodexSession: (replacement) =>
+      replaceCodexSession: (currentSessionId, replacement) =>
         replaceCodexIndexFixture(
           codexDatabasePath,
-          fixture.sessionId,
+          currentSessionId,
           replacement,
         ),
     }

@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema } from "effect"
+import { Context, Effect, Schema } from "effect"
 
 import type { SessionView } from "../domain/session.js"
 
@@ -20,9 +20,20 @@ export class SessionStorageError extends Schema.TaggedErrorClass<SessionStorageE
   },
 ) {}
 
+export interface SessionStorageSnapshot {
+  readonly views: ReadonlyArray<SessionView>
+  readonly lastCommitSequence: number
+}
+
 export interface Interface {
-  readonly load: () => Effect.Effect<Option.Option<SessionView>, SessionStorageError>
-  readonly commit: (view: SessionView) => Effect.Effect<void, SessionStorageError>
+  readonly load: () => Effect.Effect<
+    SessionStorageSnapshot,
+    SessionStorageError
+  >
+  readonly commit: (
+    expectedPreviousCommitSequence: number,
+    changedViews: ReadonlyArray<SessionView>,
+  ) => Effect.Effect<void, SessionStorageError>
 }
 
 export class Service extends Context.Service<Service, Interface>()(

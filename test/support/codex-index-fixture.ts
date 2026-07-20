@@ -11,6 +11,19 @@ export interface CodexIndexFixture {
   readonly forbiddenContent: string
 }
 
+export type CodexIndexFixtureInput =
+  | CodexIndexFixture
+  | ReadonlyArray<CodexIndexFixture>
+
+const isFixtureArray = (
+  input: CodexIndexFixtureInput,
+): input is ReadonlyArray<CodexIndexFixture> => Array.isArray(input)
+
+const asFixtureArray = (
+  input: CodexIndexFixtureInput,
+): ReadonlyArray<CodexIndexFixture> =>
+  isFixtureArray(input) ? input : [input]
+
 const fixtureError = () =>
   new SessionSourceError({
     code: "unavailable",
@@ -18,7 +31,7 @@ const fixtureError = () =>
   })
 
 export const createCodexIndexFixture = Effect.fn("CodexIndexFixture.create")(
-  function* (path: string, fixture: CodexIndexFixture) {
+  function* (path: string, input: CodexIndexFixtureInput) {
     yield* Effect.try({
       try: () => {
         const database = new DatabaseSync(path, {
@@ -29,7 +42,7 @@ export const createCodexIndexFixture = Effect.fn("CodexIndexFixture.create")(
         try {
           database.exec(`
             CREATE TABLE threads (
-              id TEXT PRIMARY KEY,
+              id TEXT NOT NULL,
               cwd TEXT NOT NULL,
               updated_at_ms INTEGER NOT NULL,
               archived INTEGER NOT NULL,
@@ -39,8 +52,7 @@ export const createCodexIndexFixture = Effect.fn("CodexIndexFixture.create")(
               preview TEXT
             )
           `)
-          database
-            .prepare(`
+          const insert = database.prepare(`
               INSERT INTO threads (
                 id,
                 cwd,
@@ -52,7 +64,8 @@ export const createCodexIndexFixture = Effect.fn("CodexIndexFixture.create")(
                 preview
               ) VALUES (?, ?, ?, 0, 'user', ?, ?, ?)
             `)
-            .run(
+          for (const fixture of asFixtureArray(input)) {
+            insert.run(
               fixture.sessionId,
               fixture.projectIdentity,
               fixture.sourceUpdatedAtMs,
@@ -60,6 +73,7 @@ export const createCodexIndexFixture = Effect.fn("CodexIndexFixture.create")(
               fixture.forbiddenContent,
               fixture.forbiddenContent,
             )
+          }
         } finally {
           database.close()
         }
@@ -79,9 +93,12 @@ export const updateCodexIndexFixture = Effect.fn("CodexIndexFixture.update")(
           readBigInts: false,
         })
         try {
-          database
+          const result = database
             .prepare("UPDATE threads SET updated_at_ms = ? WHERE id = ?")
             .run(sourceUpdatedAtMs, sessionId)
+          if (result.changes !== 1) {
+            throw new Error("Expected one exact Codex session fixture update")
+          }
         } finally {
           database.close()
         }
@@ -105,7 +122,7 @@ export const replaceCodexIndexFixture = Effect.fn("CodexIndexFixture.replace")(
           readBigInts: false,
         })
         try {
-          database
+          const result = database
             .prepare(`
               UPDATE threads
               SET id = ?, cwd = ?, updated_at_ms = ?
@@ -117,6 +134,9 @@ export const replaceCodexIndexFixture = Effect.fn("CodexIndexFixture.replace")(
               replacement.sourceUpdatedAtMs,
               currentSessionId,
             )
+          if (result.changes !== 1) {
+            throw new Error("Expected one exact Codex session fixture replacement")
+          }
         } finally {
           database.close()
         }

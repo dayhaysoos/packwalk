@@ -4,10 +4,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Exit, Layer, Option, Scope } from "effect"
+import { Context, Effect, Exit, Layer, Scope } from "effect"
 
 import { Service as SessionStorage } from "../src/application/session-storage.js"
 import { layer as sqliteSessionStorageLayer } from "../src/adapters/sqlite-session-storage.js"
+import {
+  ProjectIdentity,
+  SessionIdentity,
+  SessionState,
+  SessionView,
+} from "../src/domain/session.js"
 
 interface StoredSessionRow {
   readonly protocolVersion: number
@@ -34,6 +40,29 @@ const validRow: StoredSessionRow = {
   observedAtMs: 2_000,
   commitSequence: 1,
 }
+
+const makeSessionView = (
+  sessionId: string,
+  commitSequence: number,
+  sourceUpdatedAtMs: number,
+  observedAtMs: number,
+  state: "Discovered" | "Polled" = "Discovered",
+) =>
+  SessionView.make({
+    protocolVersion: 1,
+    sessionId: SessionIdentity.make(sessionId),
+    projectIdentity: ProjectIdentity.make("shared-fixture-project"),
+    activity: "persisted Codex activity",
+    evidenceSource: "codex-sqlite-thread-index",
+    state:
+      state === "Discovered"
+        ? SessionState.cases.Discovered.make({})
+        : SessionState.cases.Polled.make({}),
+    freshness: "fresh",
+    sourceUpdatedAtMs,
+    observedAtMs,
+    commitSequence,
+  })
 
 const seedLooseSessionTable = (path: string, row: StoredSessionRow) => {
   const database = new DatabaseSync(path)
@@ -74,7 +103,7 @@ const seedLooseSessionTable = (path: string, row: StoredSessionRow) => {
   }
 }
 
-it.effect("rejects every incompatible field in a persisted session row without echoing it", () =>
+it.effect("rejects every incompatible legacy field during migration without echoing it", () =>
   Effect.gen(function* () {
     const directory = yield* Effect.acquireRelease(
       Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-row-test-"))),
@@ -105,16 +134,172 @@ it.effect("rejects every incompatible field in a persisted session row without e
     for (const [index, row] of incompatibleRows.entries()) {
       const path = join(directory, `incompatible-${index}.sqlite`)
       yield* Effect.sync(() => seedLooseSessionTable(path, row))
-      const context = yield* Layer.build(sqliteSessionStorageLayer(path))
-      const storage = Context.get(context, SessionStorage)
-      const error = yield* Effect.flip(storage.load())
+      const error = yield* Effect.flip(
+        Layer.build(sqliteSessionStorageLayer(path)),
+      )
 
       expect(error).toMatchObject({
-        operation: "SessionStorage.decodeRow",
-        message: "PackWalk could not decode its stored session view",
+        operation: "SessionStorage.open",
+        message: "PackWalk could not open its session storage",
       })
       expect(JSON.stringify(error)).not.toContain(sensitiveValue)
     }
+  }),
+  30_000,
+)
+
+it.effect("preserves a valid legacy session with a checked migration and SQLite backup", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-migration-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk.sqlite")
+    const legacyRow = { ...validRow, commitSequence: 7 }
+    yield* Effect.sync(() => seedLooseSessionTable(path, legacyRow))
+
+    const context = yield* Layer.build(sqliteSessionStorageLayer(path))
+    const storage = Context.get(context, SessionStorage)
+
+    expect(yield* storage.load()).toEqual({
+      views: [
+        {
+          protocolVersion: legacyRow.protocolVersion,
+          sessionId: legacyRow.sessionId,
+          projectIdentity: legacyRow.projectIdentity,
+          activity: legacyRow.activity,
+          evidenceSource: legacyRow.evidenceSource,
+          state: { _tag: legacyRow.stateTag },
+          freshness: legacyRow.freshness,
+          sourceUpdatedAtMs: legacyRow.sourceUpdatedAtMs,
+          observedAtMs: legacyRow.observedAtMs,
+          commitSequence: legacyRow.commitSequence,
+        },
+      ],
+      lastCommitSequence: 7,
+    })
+
+    const migrated = new DatabaseSync(path, { readOnly: true })
+    try {
+      expect(
+        migrated
+          .prepare(`
+            SELECT name
+            FROM sqlite_schema
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+          `)
+          .all(),
+      ).toEqual([
+        { name: "current_sessions" },
+        { name: "schema_migrations" },
+        { name: "storage_state" },
+      ])
+      expect(
+        migrated
+          .prepare("SELECT version, checksum FROM schema_migrations")
+          .get(),
+      ).toMatchObject({
+        version: 2,
+        checksum: expect.stringMatching(/^[0-9a-f]{64}$/),
+      })
+    } finally {
+      migrated.close()
+    }
+
+    const backupDatabase = new DatabaseSync(
+      `${path}.pre-migration-v2.sqlite`,
+      { readOnly: true },
+    )
+    try {
+      expect(
+        backupDatabase
+          .prepare(`
+            SELECT name
+            FROM sqlite_schema
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+          `)
+          .all(),
+      ).toEqual([{ name: "current_session" }])
+      expect(
+        backupDatabase
+          .prepare(`
+            SELECT session_id, project_identity, commit_sequence
+            FROM current_session
+            WHERE singleton = 1
+          `)
+          .get(),
+      ).toEqual({
+        session_id: legacyRow.sessionId,
+        project_identity: legacyRow.projectIdentity,
+        commit_sequence: legacyRow.commitSequence,
+      })
+    } finally {
+      backupDatabase.close()
+    }
+  }),
+  30_000,
+)
+
+it.effect("allocates one global sequence while isolating two session commits", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-batch-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk.sqlite")
+    const context = yield* Layer.build(sqliteSessionStorageLayer(path))
+    const storage = Context.get(context, SessionStorage)
+    const first = makeSessionView(
+      "019f77d2-1a10-7cf0-b5df-76eebb4071aa",
+      1,
+      1_000,
+      2_000,
+    )
+    const second = makeSessionView(
+      "019f77d2-1a10-7cf0-b5df-76eebb4071bb",
+      2,
+      1_100,
+      2_000,
+    )
+
+    yield* storage.commit(0, [second, first])
+    expect(yield* storage.load()).toEqual({
+      views: [first, second],
+      lastCommitSequence: 2,
+    })
+
+    const updatedFirst = makeSessionView(
+      first.sessionId,
+      3,
+      1_500,
+      2_500,
+      "Polled",
+    )
+    yield* storage.commit(2, [updatedFirst])
+    expect(yield* storage.load()).toEqual({
+      views: [updatedFirst, second],
+      lastCommitSequence: 3,
+    })
+
+    const staleSecond = makeSessionView(
+      second.sessionId,
+      3,
+      9_000,
+      9_000,
+      "Polled",
+    )
+    const staleCommitError = yield* Effect.flip(
+      storage.commit(2, [staleSecond]),
+    )
+    expect(staleCommitError).toMatchObject({
+      operation: "SessionStorage.commit",
+      message: "PackWalk could not commit its current session view",
+    })
+    expect(yield* storage.load()).toEqual({
+      views: [updatedFirst, second],
+      lastCommitSequence: 3,
+    })
   }),
 )
 
@@ -171,7 +356,10 @@ it.effect("keeps one storage connection for the scope and closes it at finalizat
       )
       const storage = Context.get(context, SessionStorage)
 
-      expect(Option.isNone(yield* storage.load())).toBe(true)
+      expect(yield* storage.load()).toEqual({
+        views: [],
+        lastCommitSequence: 0,
+      })
       expect(closeCount).toBe(0)
 
       yield* Scope.close(scope, Exit.void)

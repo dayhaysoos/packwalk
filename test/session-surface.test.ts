@@ -41,9 +41,9 @@ it.effect("publishes one committed discovered snapshot and one committed polling
 
     expect(events).toEqual([
       {
-        _tag: "SessionSnapshot",
-        protocolVersion: 1,
-        view: {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [{
           protocolVersion: 1,
           sessionId,
           projectIdentity: "fixture-project",
@@ -54,12 +54,12 @@ it.effect("publishes one committed discovered snapshot and one committed polling
           sourceUpdatedAtMs: 1_000,
           observedAtMs: 2_000,
           commitSequence: 1,
-        },
+        }],
       },
       {
-        _tag: "SessionUpdated",
-        protocolVersion: 1,
-        view: {
+        _tag: "SessionsUpdated",
+        protocolVersion: 2,
+        views: [{
           protocolVersion: 1,
           sessionId,
           projectIdentity: "fixture-project",
@@ -70,7 +70,8 @@ it.effect("publishes one committed discovered snapshot and one committed polling
           sourceUpdatedAtMs: 2_500,
           observedAtMs: 3_000,
           commitSequence: 2,
-        },
+        }],
+        changedSessionIds: [sessionId],
       },
     ])
 
@@ -78,13 +79,13 @@ it.effect("publishes one committed discovered snapshot and one committed polling
       yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
     )
     expect(reconnect[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: { commitSequence: 2, state: { _tag: "Polled" } },
+      _tag: "SessionsSnapshot",
+      views: [{ commitSequence: 2, state: { _tag: "Polled" } }],
     })
   }),
 )
 
-it.effect("replaces a restored singleton when startup discovers a different one-session identity", () =>
+it.effect("adds a discovered identity without replacing a restored exact session", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
     const replacementSessionId =
@@ -116,15 +117,24 @@ it.effect("replaces a restored singleton when startup discovers a different one-
       yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
     )
     expect(events[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: {
-        sessionId: replacementSessionId,
-        projectIdentity: "replacement-project",
-        state: { _tag: "Discovered" },
-        sourceUpdatedAtMs: 1_500,
-        observedAtMs: 2_000,
-        commitSequence: 8,
-      },
+      _tag: "SessionsSnapshot",
+      views: [
+        {
+          sessionId,
+          projectIdentity: "restored-project",
+          state: { _tag: "Polled" },
+          sourceUpdatedAtMs: 9_000,
+          commitSequence: 7,
+        },
+        {
+          sessionId: replacementSessionId,
+          projectIdentity: "replacement-project",
+          state: { _tag: "Discovered" },
+          sourceUpdatedAtMs: 1_500,
+          observedAtMs: 2_000,
+          commitSequence: 8,
+        },
+      ],
     })
   }),
 )
@@ -143,7 +153,7 @@ it.effect("publishes the first successful reread once before later persisted act
     const rereadObserved = yield* Deferred.make<void>()
     const collected = yield* packWalk.events.pipe(
       Stream.tap((event) =>
-        event._tag === "SessionSnapshot"
+        event._tag === "SessionsSnapshot"
           ? Deferred.succeed(initialObserved, undefined)
           : Deferred.succeed(rereadObserved, undefined),
       ),
@@ -162,9 +172,9 @@ it.effect("publishes the first successful reread once before later persisted act
 
     expect(Array.from(yield* Fiber.join(collected))).toEqual([
       {
-        _tag: "SessionSnapshot",
-        protocolVersion: 1,
-        view: {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [{
           protocolVersion: 1,
           sessionId,
           projectIdentity: "fixture-project",
@@ -175,12 +185,12 @@ it.effect("publishes the first successful reread once before later persisted act
           sourceUpdatedAtMs: 1_000,
           observedAtMs: 2_000,
           commitSequence: 1,
-        },
+        }],
       },
       {
-        _tag: "SessionUpdated",
-        protocolVersion: 1,
-        view: {
+        _tag: "SessionsUpdated",
+        protocolVersion: 2,
+        views: [{
           protocolVersion: 1,
           sessionId,
           projectIdentity: "fixture-project",
@@ -191,12 +201,13 @@ it.effect("publishes the first successful reread once before later persisted act
           sourceUpdatedAtMs: 1_000,
           observedAtMs: 3_000,
           commitSequence: 2,
-        },
+        }],
+        changedSessionIds: [sessionId],
       },
       {
-        _tag: "SessionUpdated",
-        protocolVersion: 1,
-        view: {
+        _tag: "SessionsUpdated",
+        protocolVersion: 2,
+        views: [{
           protocolVersion: 1,
           sessionId,
           projectIdentity: "fixture-project",
@@ -207,7 +218,8 @@ it.effect("publishes the first successful reread once before later persisted act
           sourceUpdatedAtMs: 2_500,
           observedAtMs: 5_000,
           commitSequence: 3,
-        },
+        }],
+        changedSessionIds: [sessionId],
       },
     ])
   }),
@@ -229,7 +241,7 @@ it.effect("resumes a slow subscriber at the latest committed session view", () =
     const releaseSubscriber = yield* Deferred.make<void>()
     const collected = yield* surface.events.pipe(
       Stream.tap((event) =>
-        event._tag === "SessionSnapshot"
+        event._tag === "SessionsSnapshot"
           ? Deferred.succeed(initialObserved, undefined).pipe(
               Effect.andThen(Deferred.await(releaseSubscriber)),
             )
@@ -250,17 +262,17 @@ it.effect("resumes a slow subscriber at the latest committed session view", () =
 
     const events = Array.from(yield* Fiber.join(collected))
     expect(events[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: { commitSequence: 1, state: { _tag: "Discovered" } },
+      _tag: "SessionsSnapshot",
+      views: [{ commitSequence: 1, state: { _tag: "Discovered" } }],
     })
     expect(events[1]).toMatchObject({
-      _tag: "SessionUpdated",
-      view: {
+      _tag: "SessionsUpdated",
+      views: [{
         commitSequence: 4,
         sourceUpdatedAtMs: 3_500,
         observedAtMs: 5_000,
         state: { _tag: "Polled" },
-      },
+      }],
     })
   }),
 )
@@ -299,7 +311,7 @@ it.effect("rejects incompatible or content-bearing evidence with a redacted publ
       expect(events).toEqual([
         {
           _tag: "SessionUnavailable",
-          protocolVersion: 1,
+          protocolVersion: 2,
           code: "source-incompatible",
           message: "PackWalk could not read supported Codex persisted evidence",
         },
@@ -338,15 +350,15 @@ it.effect("recovers startup discovery when a later CLI subscribes after evidence
       yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
     )
     expect(recovered[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: {
+      _tag: "SessionsSnapshot",
+      views: [{
         sessionId,
         projectIdentity: "fixture-project",
         state: { _tag: "Discovered" },
         sourceUpdatedAtMs: 2_500,
         observedAtMs: 2_000,
         commitSequence: 1,
-      },
+      }],
     })
   }),
 )
@@ -379,14 +391,14 @@ it.effect("does not publish a session update when its authoritative commit fails
 
     const events = Array.from(yield* Fiber.join(collected))
 
-    expect(events[0]?._tag).toBe("SessionSnapshot")
+    expect(events[0]?._tag).toBe("SessionsSnapshot")
     expect(events[1]).toEqual({
       _tag: "SessionUnavailable",
-      protocolVersion: 1,
+      protocolVersion: 2,
       code: "storage-unavailable",
       message: "PackWalk could not commit its current session view",
     })
-    expect(events.some((event) => event._tag === "SessionUpdated")).toBe(false)
+    expect(events.some((event) => event._tag === "SessionsUpdated")).toBe(false)
   }),
 )
 
@@ -413,10 +425,10 @@ it.effect("recovers a source-lost poll on reconnect and resumes exact-identity p
     yield* TestClock.adjust("1 second")
 
     const events = Array.from(yield* Fiber.join(collected))
-    expect(events[0]?._tag).toBe("SessionSnapshot")
+    expect(events[0]?._tag).toBe("SessionsSnapshot")
     expect(events[1]).toEqual({
       _tag: "SessionUnavailable",
-      protocolVersion: 1,
+      protocolVersion: 2,
       code: "source-unavailable",
       message: "PackWalk could not read supported Codex persisted evidence",
     })
@@ -425,7 +437,7 @@ it.effect("recovers a source-lost poll on reconnect and resumes exact-identity p
     const recoveredObserved = yield* Deferred.make<void>()
     const recovered = yield* packWalk.events.pipe(
       Stream.tap((event) =>
-        event._tag === "SessionSnapshot"
+        event._tag === "SessionsSnapshot"
           ? Deferred.succeed(recoveredObserved, undefined)
           : Effect.void,
       ),
@@ -440,25 +452,25 @@ it.effect("recovers a source-lost poll on reconnect and resumes exact-identity p
 
     const recoveredEvents = Array.from(yield* Fiber.join(recovered))
     expect(recoveredEvents[0]).toMatchObject({
-      _tag: "SessionSnapshot",
-      view: {
+      _tag: "SessionsSnapshot",
+      views: [{
         sessionId,
         projectIdentity: "fixture-project",
         state: { _tag: "Discovered" },
         sourceUpdatedAtMs: 1_000,
         commitSequence: 1,
-      },
+      }],
     })
     expect(recoveredEvents[1]).toMatchObject({
-      _tag: "SessionUpdated",
-      view: {
+      _tag: "SessionsUpdated",
+      views: [{
         sessionId,
         projectIdentity: "fixture-project",
         state: { _tag: "Polled" },
         sourceUpdatedAtMs: 2_500,
         observedAtMs: 4_000,
         commitSequence: 2,
-      },
+      }],
     })
   }),
 )
@@ -474,7 +486,7 @@ it.effect("surfaces an unrecoverable polling worker failure to the daemon owner"
       sourceUpdatedAtMs: 1_000,
     })
     const first = yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect)
-    expect(Array.from(first)[0]?._tag).toBe("SessionSnapshot")
+    expect(Array.from(first)[0]?._tag).toBe("SessionsSnapshot")
 
     const runtimeFailure = yield* packWalk.lifetime.pipe(
       Effect.flip,
