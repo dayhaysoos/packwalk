@@ -5,6 +5,26 @@ The publication target is exactly the public repository
 they are not a requirement that outside contributors reproduce its credential
 layout.
 
+## Authentication profile
+
+Prefer the maintainer helpers when the current machine provides them:
+
+```sh
+zsh -ic 'gh-day api user --jq .login'
+```
+
+On another machine where `gh-day` and `git-day` are unavailable, the standard
+GitHub CLI profile is supported after explicit identity verification:
+
+```sh
+gh auth status
+gh api user --jq .login
+```
+
+The selected command must report exactly `dayhaysoos`. Never publish through a
+different active account or assume that cached Git credentials belong to the
+maintainer.
+
 ## Preflight
 
 From the PackWalk checkout, verify:
@@ -14,18 +34,11 @@ git rev-parse --show-toplevel
 git branch --show-current
 git remote get-url origin
 git status --short --branch
-gh-day api user --jq .login
-```
-
-When an agent's non-interactive shell does not load the helper functions, invoke
-the same helpers through the configured interactive zsh environment:
-
-```sh
-zsh -ic 'gh-day api user --jq .login'
 ```
 
 The branch must be the intended branch, the remote must identify
-`dayhaysoos/packwalk`, and `gh-day` must report `dayhaysoos` before publication.
+`dayhaysoos/packwalk`, and the selected GitHub authentication profile must report
+`dayhaysoos` before publication.
 
 Use the public commit identity:
 
@@ -35,7 +48,7 @@ Nick DeJesus <1852675+dayhaysoos@users.noreply.github.com>
 
 Verify both author and committer metadata after committing.
 
-## Push
+## Push with maintainer helpers
 
 Push through the configured maintainer helper:
 
@@ -49,10 +62,18 @@ For a non-interactive agent shell, the equivalent helper invocation is:
 zsh -ic 'git-day push origin main'
 ```
 
-Do not use bare `gh`, ordinary cached Git credentials, `--all`, `--mirror`, or
-another account as a fallback. If `gh-day` or `git-day` is unavailable or does
-not identify `dayhaysoos`, stop and ask the maintainer to repair the configured
-path.
+## Push with standard GitHub CLI authentication
+
+After standard `gh` has been verified as `dayhaysoos`, push the intended branch
+normally:
+
+```sh
+git push origin main
+```
+
+If Git is not using the verified GitHub CLI credentials, run `gh auth setup-git`,
+repeat the identity preflight, and retry the one intended push. Do not use
+`--all`, `--mirror`, another account, or unverified cached credentials.
 
 Keep `.scratch` as the versioned issue tracker; publishing does not create
 GitHub Issues.

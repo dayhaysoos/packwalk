@@ -48,6 +48,14 @@ work requires a separate future product decision.
 Issues and specs are versioned Markdown under `.scratch/`. See
 `docs/agents/issue-tracker.md`. Do not duplicate them as GitHub Issues.
 
+## Product acceptance preflight
+
+Before asking the maintainer to test a delivery personally, invoke the
+repo-local `$product-preflight-reviewer`. It tests the ticket through public
+product surfaces, reports acceptance blockers separately from improvement
+opportunities, and hands off only the evidence that still requires human
+judgment. A preflight does not implement fixes or mark human acceptance.
+
 ## Domain and triage
 
 This is a single-context repository. Follow `docs/agents/domain.md` and use the
@@ -55,6 +63,8 @@ default five-role vocabulary in `docs/agents/triage-labels.md`.
 
 ## Maintainer publication
 
-Follow `docs/agents/publishing.md`. On the configured maintainer environment,
-verify `gh-day` resolves to `dayhaysoos` and push with `git-day`. Never fall
-back to bare `gh` or unrelated cached Git credentials.
+Follow `docs/agents/publishing.md`. Prefer the configured `gh-day` and `git-day`
+helpers when they are available. On another machine, standard `gh` and
+`git push` are allowed only after `gh api user --jq .login` reports
+`dayhaysoos`. Never publish through another GitHub identity or unverified cached
+credentials.

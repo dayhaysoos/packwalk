@@ -1,0 +1,4 @@
+interface:
+  display_name: "PackWalk Product Preflight"
+  short_description: "Test PackWalk outcomes before human acceptance"
+  default_prompt: "Use $product-preflight-reviewer to test the active PackWalk ticket from the maintainer perspective before human acceptance."
