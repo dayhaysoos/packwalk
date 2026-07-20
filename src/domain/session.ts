@@ -51,18 +51,48 @@ export const SessionState = Schema.TaggedUnion({
 
 export type SessionState = typeof SessionState.Type
 
+export const SessionRetentionReason = Schema.Literals([
+  "source-unavailable",
+  "source-unsupported",
+])
+
+export type SessionRetentionReason = typeof SessionRetentionReason.Type
+
+export const SessionProvenance = Schema.TaggedUnion({
+  Observed: {},
+  Retained: {
+    reason: SessionRetentionReason,
+  },
+})
+
+export type SessionProvenance = typeof SessionProvenance.Type
+
+interface SessionViewConsistencyInput {
+  readonly freshness: "fresh" | "stale"
+  readonly provenance: SessionProvenance
+}
+
+const SessionViewConsistency =
+  Schema.makeFilter<SessionViewConsistencyInput>((view) =>
+    (view.provenance._tag === "Observed" && view.freshness === "fresh") ||
+      (view.provenance._tag === "Retained" && view.freshness === "stale")
+      ? undefined
+      : "session freshness and provenance must describe the same evidence",
+  )
+
 export const SessionView = Schema.Struct({
-  protocolVersion: Schema.Literal(1),
+  protocolVersion: Schema.Literal(2),
   sessionId: SessionIdentity,
   projectIdentity: ProjectIdentity,
   activity: Schema.Literal("persisted Codex activity"),
   evidenceSource: Schema.Literal("codex-sqlite-thread-index"),
   state: SessionState,
-  freshness: Schema.Literal("fresh"),
+  freshness: Schema.Literals(["fresh", "stale"]),
+  provenance: SessionProvenance,
   sourceUpdatedAtMs: DateTimestampMs,
   observedAtMs: DateTimestampMs,
   commitSequence: PositiveSafeInteger,
-})
+}).check(SessionViewConsistency)
 
 export interface SessionView extends Schema.Schema.Type<typeof SessionView> {}
 
@@ -113,12 +143,12 @@ const overviewUnavailableMessage =
   "PackWalk could not publish its current session overview" as const
 
 const SessionsSnapshotFields = {
-  protocolVersion: Schema.Literal(2),
+  protocolVersion: Schema.Literal(3),
   views: SessionViews,
 } as const
 
 const SessionsUpdatedFields = {
-  protocolVersion: Schema.Literal(2),
+  protocolVersion: Schema.Literal(3),
   views: SessionViews,
   changedSessionIds: ChangedSessionIdentities,
 } as const
@@ -140,7 +170,7 @@ const SessionUnavailableMessage = Schema.Literals([
 
 interface SessionEventConsistencyInput {
   readonly _tag: string
-  readonly protocolVersion: 1 | 2
+  readonly protocolVersion: 3
   readonly views?: ReadonlyArray<SessionView>
   readonly changedSessionIds?: ReadonlyArray<SessionIdentity>
   readonly code?: typeof SessionUnavailableCode.Type
@@ -169,14 +199,6 @@ const SessionEventConsistency = Schema.makeFilter<SessionEventConsistencyInput>(
       return undefined
     }
 
-    if (
-      (event.code === "source-ambiguous" ||
-        event.code === "overview-unavailable") &&
-      event.protocolVersion !== 2
-    ) {
-      return "this unavailable session result requires protocol version 2"
-    }
-
     const valid =
       event.code === "storage-unavailable"
         ? event.message === storageUnavailableMessage
@@ -192,37 +214,20 @@ const SessionEventConsistency = Schema.makeFilter<SessionEventConsistencyInput>(
   },
 )
 
-export const SessionEvent = Schema.TaggedUnion({
-  SessionSnapshot: {
-    protocolVersion: Schema.Literal(1),
-    view: SessionView,
-  },
-  SessionUpdated: {
-    protocolVersion: Schema.Literal(1),
-    view: SessionView,
-  },
-  SessionsSnapshot: SessionsSnapshotFields,
-  SessionsUpdated: SessionsUpdatedFields,
-  SessionUnavailable: {
-    protocolVersion: Schema.Literals([1, 2]),
-    code: SessionUnavailableCode,
-    message: SessionUnavailableMessage,
-  },
-}).check(SessionEventConsistency)
-
-export type SessionEvent = typeof SessionEvent.Type
-
 export const SessionProtocolEvent = Schema.TaggedUnion({
   SessionsSnapshot: SessionsSnapshotFields,
   SessionsUpdated: SessionsUpdatedFields,
   SessionUnavailable: {
-    protocolVersion: Schema.Literal(2),
+    protocolVersion: Schema.Literal(3),
     code: SessionUnavailableCode,
     message: SessionUnavailableMessage,
   },
 }).check(SessionEventConsistency)
 
 export type SessionProtocolEvent = typeof SessionProtocolEvent.Type
+
+export const SessionEvent = SessionProtocolEvent
+export type SessionEvent = SessionProtocolEvent
 
 const SessionProtocolEventJsonString = Schema.String.check(
   Schema.makeFilter((encoded) =>
@@ -268,7 +273,6 @@ export const matchSessionTransitionTrigger =
 type TransitionDecision = Data.TaggedEnum<{
   NoChange: {}
   Changed: {
-    readonly event: SessionEvent
     readonly view: SessionView
   }
 }>
@@ -281,13 +285,14 @@ const makeDiscoveredSessionView = (
   commitSequence: number,
 ): SessionView =>
   SessionView.make({
-    protocolVersion: 1,
+    protocolVersion: 2,
     sessionId: fact.sessionId,
     projectIdentity: fact.projectIdentity,
     activity: "persisted Codex activity",
     evidenceSource: "codex-sqlite-thread-index",
     state: SessionState.cases.Discovered.make({}),
     freshness: "fresh",
+    provenance: SessionProvenance.cases.Observed.make({}),
     sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
     observedAtMs,
     commitSequence,
@@ -307,12 +312,7 @@ export const transitionSession = (
       commitSequence ?? 1,
     )
 
-    return Result.succeed(
-      TransitionDecision.Changed({
-        view,
-        event: SessionEvent.cases.SessionSnapshot.make({ protocolVersion: 1, view }),
-      }),
-    )
+    return Result.succeed(TransitionDecision.Changed({ view }))
   }
 
   if (!sameSessionIdentity(current.value.sessionId, fact.sessionId)) {
@@ -328,8 +328,10 @@ export const transitionSession = (
   }
 
   const unchangedEvidenceIsNoChange = matchSessionTransitionTrigger(trigger, {
-    Discovery: () => true,
-    Polling: () => current.value.state._tag === "Polled",
+    Discovery: () => current.value.provenance._tag === "Observed",
+    Polling: () =>
+      current.value.state._tag === "Polled" &&
+      current.value.provenance._tag === "Observed",
   })
   if (
     unchangedEvidenceIsNoChange &&
@@ -341,17 +343,37 @@ export const transitionSession = (
   const view = SessionView.make({
     ...current.value,
     state: SessionState.cases.Polled.make({}),
+    freshness: "fresh",
+    provenance: SessionProvenance.cases.Observed.make({}),
     sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
     observedAtMs,
     commitSequence: commitSequence ?? current.value.commitSequence + 1,
   })
 
-  return Result.succeed(
-    TransitionDecision.Changed({
-      view,
-      event: SessionEvent.cases.SessionUpdated.make({ protocolVersion: 1, view }),
+  return Result.succeed(TransitionDecision.Changed({ view }))
+}
+
+export const degradeSession = (
+  current: SessionView,
+  reason: SessionRetentionReason,
+  commitSequence: number = current.commitSequence + 1,
+): TransitionDecision => {
+  if (
+    current.provenance._tag === "Retained" &&
+    (current.provenance.reason === reason ||
+      current.provenance.reason === "source-unsupported")
+  ) {
+    return TransitionDecision.NoChange()
+  }
+
+  return TransitionDecision.Changed({
+    view: SessionView.make({
+      ...current,
+      freshness: "stale",
+      provenance: SessionProvenance.cases.Retained.make({ reason }),
+      commitSequence,
     }),
-  )
+  })
 }
 
 export const matchTransition = TransitionDecision.$match

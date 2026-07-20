@@ -1,8 +1,20 @@
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Result, Stream } from "effect"
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Ref,
+  Result,
+  Scope,
+  Stream,
+} from "effect"
 import { TestClock } from "effect/testing"
 
-import { makeDeterministicPackWalk } from "./support/deterministic-packwalk.js"
+import {
+  makeDeterministicPackWalk,
+  makeRestartableDeterministicPackWalk,
+} from "./support/deterministic-packwalk.js"
 import { makeDeterministicSessionSurface } from "./support/deterministic-session-surface.js"
 import {
   CodexPersistedFact,
@@ -11,6 +23,7 @@ import {
   ProjectIdentity,
   SessionEvent,
   SessionIdentity,
+  SessionProvenance,
   SessionState,
   SessionView,
 } from "../src/domain/session.js"
@@ -70,15 +83,16 @@ it.effect("publishes one committed discovered snapshot and one committed polling
     expect(events).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [{
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId,
           projectIdentity: "fixture-project",
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: { _tag: "Discovered" },
           freshness: "fresh",
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: 1_000,
           observedAtMs: 2_000,
           commitSequence: 1,
@@ -86,15 +100,16 @@ it.effect("publishes one committed discovered snapshot and one committed polling
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [{
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId,
           projectIdentity: "fixture-project",
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: { _tag: "Polled" },
           freshness: "fresh",
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: 2_500,
           observedAtMs: 3_000,
           commitSequence: 2,
@@ -127,13 +142,14 @@ it.effect("adds a discovered identity without replacing a restored exact session
       }),
       {
         restored: SessionView.make({
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId: SessionIdentity.make(sessionId),
           projectIdentity: ProjectIdentity.make("restored-project"),
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: SessionState.cases.Polled.make({}),
           freshness: "fresh",
+          provenance: SessionProvenance.cases.Observed.make({}),
           sourceUpdatedAtMs: 9_000,
           observedAtMs: 1_000,
           commitSequence: 7,
@@ -167,7 +183,7 @@ it.effect("adds a discovered identity without replacing a restored exact session
   }),
 )
 
-it.effect("rejects crossed exact polling results before publishing a session update", () =>
+it.effect("retains crossed exact polling results as unsupported without merging them", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
     const firstSessionId =
@@ -209,28 +225,30 @@ it.effect("rejects crossed exact polling results before publishing a session upd
     expect(Array.from(yield* Fiber.join(published))).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [
           {
-            protocolVersion: 1,
+            protocolVersion: 2,
             sessionId: firstSessionId,
             projectIdentity: "shared-project",
             activity: "persisted Codex activity",
             evidenceSource: "codex-sqlite-thread-index",
             state: { _tag: "Discovered" },
             freshness: "fresh",
+            provenance: { _tag: "Observed" },
             sourceUpdatedAtMs: 1_000,
             observedAtMs: 2_000,
             commitSequence: 1,
           },
           {
-            protocolVersion: 1,
+            protocolVersion: 2,
             sessionId: secondSessionId,
             projectIdentity: "shared-project",
             activity: "persisted Codex activity",
             evidenceSource: "codex-sqlite-thread-index",
             state: { _tag: "Discovered" },
             freshness: "fresh",
+            provenance: { _tag: "Observed" },
             sourceUpdatedAtMs: 1_500,
             observedAtMs: 2_000,
             commitSequence: 2,
@@ -238,10 +256,33 @@ it.effect("rejects crossed exact polling results before publishing a session upd
         ],
       },
       {
-        _tag: "SessionUnavailable",
-        protocolVersion: 2,
-        code: "source-incompatible",
-        message: "PackWalk could not read supported Codex persisted evidence",
+        _tag: "SessionsUpdated",
+        protocolVersion: 3,
+        views: [
+          expect.objectContaining({
+            sessionId: firstSessionId,
+            freshness: "stale",
+            provenance: {
+              _tag: "Retained",
+              reason: "source-unsupported",
+            },
+            sourceUpdatedAtMs: 1_000,
+            observedAtMs: 2_000,
+            commitSequence: 3,
+          }),
+          expect.objectContaining({
+            sessionId: secondSessionId,
+            freshness: "stale",
+            provenance: {
+              _tag: "Retained",
+              reason: "source-unsupported",
+            },
+            sourceUpdatedAtMs: 1_500,
+            observedAtMs: 2_000,
+            commitSequence: 4,
+          }),
+        ],
+        changedSessionIds: [firstSessionId, secondSessionId],
       },
     ])
 
@@ -252,31 +293,33 @@ it.effect("rejects crossed exact polling results before publishing a session upd
     expect(current).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [
           {
-            protocolVersion: 1,
+            protocolVersion: 2,
             sessionId: firstSessionId,
             projectIdentity: "shared-project",
             activity: "persisted Codex activity",
             evidenceSource: "codex-sqlite-thread-index",
-            state: { _tag: "Discovered" },
+            state: { _tag: "Polled" },
             freshness: "fresh",
+            provenance: { _tag: "Observed" },
             sourceUpdatedAtMs: 1_000,
-            observedAtMs: 2_000,
-            commitSequence: 1,
+            observedAtMs: 3_000,
+            commitSequence: 5,
           },
           {
-            protocolVersion: 1,
+            protocolVersion: 2,
             sessionId: secondSessionId,
             projectIdentity: "shared-project",
             activity: "persisted Codex activity",
             evidenceSource: "codex-sqlite-thread-index",
-            state: { _tag: "Discovered" },
+            state: { _tag: "Polled" },
             freshness: "fresh",
+            provenance: { _tag: "Observed" },
             sourceUpdatedAtMs: 1_500,
-            observedAtMs: 2_000,
-            commitSequence: 2,
+            observedAtMs: 3_000,
+            commitSequence: 6,
           },
         ],
       },
@@ -374,13 +417,14 @@ it.effect("falls back to a bounded complete snapshot when changed identities mak
     const facts = makeMaximumEscapedFacts(84)
     const expectedPolledViews = facts.map((fact, index) =>
       SessionView.make({
-        protocolVersion: 1,
+        protocolVersion: 2,
         sessionId: fact.sessionId,
         projectIdentity: fact.projectIdentity,
         activity: "persisted Codex activity",
         evidenceSource: "codex-sqlite-thread-index",
         state: SessionState.cases.Polled.make({}),
         freshness: "fresh",
+        provenance: SessionProvenance.cases.Observed.make({}),
         sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
         observedAtMs: 3_000,
         commitSequence: 85 + index,
@@ -395,11 +439,11 @@ it.effect("falls back to a bounded complete snapshot when changed identities mak
       ...expectedPolledViews.slice(1),
     ] as const
     const expectedSnapshot = SessionEvent.cases.SessionsSnapshot.make({
-      protocolVersion: 2,
+      protocolVersion: 3,
       views: expectedOverviewViews,
     })
     const oversizedUpdate = SessionEvent.cases.SessionsUpdated.make({
-      protocolVersion: 2,
+      protocolVersion: 3,
       views: expectedOverviewViews,
       changedSessionIds: facts.map((fact) => fact.sessionId),
     })
@@ -497,15 +541,16 @@ it.effect("publishes the first successful reread once before later persisted act
     expect(Array.from(yield* Fiber.join(collected))).toEqual([
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [{
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId,
           projectIdentity: "fixture-project",
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: { _tag: "Discovered" },
           freshness: "fresh",
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: 1_000,
           observedAtMs: 2_000,
           commitSequence: 1,
@@ -513,15 +558,16 @@ it.effect("publishes the first successful reread once before later persisted act
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [{
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId,
           projectIdentity: "fixture-project",
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: { _tag: "Polled" },
           freshness: "fresh",
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: 1_000,
           observedAtMs: 3_000,
           commitSequence: 2,
@@ -530,15 +576,16 @@ it.effect("publishes the first successful reread once before later persisted act
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [{
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId,
           projectIdentity: "fixture-project",
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: { _tag: "Polled" },
           freshness: "fresh",
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: 2_500,
           observedAtMs: 5_000,
           commitSequence: 3,
@@ -635,7 +682,7 @@ it.effect("rejects incompatible or content-bearing evidence with a redacted publ
       expect(events).toEqual([
         {
           _tag: "SessionUnavailable",
-          protocolVersion: 2,
+          protocolVersion: 3,
           code: "source-incompatible",
           message: "PackWalk could not read supported Codex persisted evidence",
         },
@@ -718,7 +765,7 @@ it.effect("does not publish a session update when its authoritative commit fails
     expect(events[0]?._tag).toBe("SessionsSnapshot")
     expect(events[1]).toEqual({
       _tag: "SessionUnavailable",
-      protocolVersion: 2,
+      protocolVersion: 3,
       code: "storage-unavailable",
       message: "PackWalk could not commit its current session view",
     })
@@ -726,7 +773,216 @@ it.effect("does not publish a session update when its authoritative commit fails
   }),
 )
 
-it.effect("recovers a source-lost poll on reconnect and resumes exact-identity polling", () =>
+it.effect("restores, degrades, recovers, and reconnects without invented replay", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+
+    const packWalk = yield* makeRestartableDeterministicPackWalk({
+      version: 1,
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 1_000,
+    })
+    const firstScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    yield* packWalk.startDaemonIn(firstScope)
+    const firstObserved = yield* Deferred.make<void>()
+    const firstRun = yield* packWalk.events.pipe(
+      Stream.tap(() => Deferred.succeed(firstObserved, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+
+    yield* Deferred.await(firstObserved)
+    yield* TestClock.adjust("1 second")
+    const firstEvents = Array.from(yield* Fiber.join(firstRun))
+    expect(firstEvents[1]).toMatchObject({
+      _tag: "SessionsUpdated",
+      views: [{
+        sessionId,
+        state: { _tag: "Polled" },
+        freshness: "fresh",
+        provenance: { _tag: "Observed" },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 3_000,
+        commitSequence: 2,
+      }],
+    })
+    yield* Scope.close(firstScope, Exit.void)
+
+    const secondScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
+    yield* packWalk.startDaemonIn(secondScope)
+    const restoredObserved = yield* Deferred.make<void>()
+    const collected = yield* packWalk.events.pipe(
+      Stream.tap(() => Deferred.succeed(restoredObserved, undefined)),
+      Stream.take(3),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+    yield* Deferred.await(restoredObserved)
+
+    yield* packWalk.loseExactSourceForTest(sessionId)
+    yield* TestClock.adjust("1 second")
+    yield* TestClock.adjust("1 second")
+    yield* packWalk.restoreExactSourceForTest(sessionId)
+    yield* TestClock.adjust("1 second")
+    yield* TestClock.adjust("1 second")
+
+    const events = Array.from(yield* Fiber.join(collected))
+    expect(events[0]).toMatchObject({
+      _tag: "SessionsSnapshot",
+      protocolVersion: 3,
+      views: [{
+        protocolVersion: 2,
+        sessionId,
+        projectIdentity: "fixture-project",
+        state: { _tag: "Polled" },
+        freshness: "fresh",
+        provenance: { _tag: "Observed" },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 3_000,
+        commitSequence: 2,
+      }],
+    })
+    expect(events[1]).toEqual({
+      _tag: "SessionsUpdated",
+      protocolVersion: 3,
+      views: [{
+        protocolVersion: 2,
+        sessionId,
+        projectIdentity: "fixture-project",
+        activity: "persisted Codex activity",
+        evidenceSource: "codex-sqlite-thread-index",
+        state: { _tag: "Polled" },
+        freshness: "stale",
+        provenance: {
+          _tag: "Retained",
+          reason: "source-unavailable",
+        },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 3_000,
+        commitSequence: 3,
+      }],
+      changedSessionIds: [sessionId],
+    })
+    expect(events[2]).toMatchObject({
+      _tag: "SessionsUpdated",
+      protocolVersion: 3,
+      views: [{
+        protocolVersion: 2,
+        sessionId,
+        state: { _tag: "Polled" },
+        freshness: "fresh",
+        provenance: { _tag: "Observed" },
+        sourceUpdatedAtMs: 1_000,
+        commitSequence: 4,
+        observedAtMs: 6_000,
+      }],
+      changedSessionIds: [sessionId],
+    })
+    const recovered = events[2]
+    if (recovered?._tag !== "SessionsUpdated") {
+      return yield* Effect.die("Expected one committed recovery update")
+    }
+
+    const reconnect = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(reconnect).toEqual([
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 3,
+        views: recovered.views,
+      }),
+    ])
+    expect(reconnect[0]).toMatchObject({
+      views: [{ commitSequence: 4, observedAtMs: 6_000 }],
+    })
+    yield* Scope.close(secondScope, Exit.void)
+  }),
+)
+
+it.effect("degrades only the exact unavailable session in a complete overview", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const secondSessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+    const packWalk = yield* makeDeterministicPackWalk([
+      {
+        version: 1,
+        sessionId,
+        projectIdentity: "shared-project",
+        sourceUpdatedAtMs: 1_000,
+      },
+      {
+        version: 1,
+        sessionId: secondSessionId,
+        projectIdentity: "shared-project",
+        sourceUpdatedAtMs: 1_500,
+      },
+    ])
+    const initialObserved = yield* Deferred.make<void>()
+    const baselineObserved = yield* Deferred.make<void>()
+    const seen = yield* Ref.make(0)
+    const collected = yield* packWalk.events.pipe(
+      Stream.tap(() =>
+        Ref.updateAndGet(seen, (count) => count + 1).pipe(
+          Effect.flatMap((count) =>
+            count === 1
+              ? Deferred.succeed(initialObserved, undefined)
+              : count === 2
+                ? Deferred.succeed(baselineObserved, undefined)
+                : Effect.void,
+          ),
+        ),
+      ),
+      Stream.take(3),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+
+    yield* Deferred.await(initialObserved)
+    yield* TestClock.adjust("1 second")
+    yield* Deferred.await(baselineObserved)
+    yield* packWalk.loseExactSourceForTest(sessionId)
+    yield* TestClock.adjust("1 second")
+
+    const events = Array.from(yield* Fiber.join(collected))
+    const baseline = events[1]
+    const degraded = events[2]
+    if (
+      baseline?._tag !== "SessionsUpdated" ||
+      degraded?._tag !== "SessionsUpdated"
+    ) {
+      return yield* Effect.die("Expected complete committed overview updates")
+    }
+    const baselineById = new Map(
+      baseline.views.map((view) => [view.sessionId, view]),
+    )
+    const degradedById = new Map(
+      degraded.views.map((view) => [view.sessionId, view]),
+    )
+    const firstExactSessionId = SessionIdentity.make(sessionId)
+    const secondExactSessionId = SessionIdentity.make(secondSessionId)
+
+    expect(degraded.changedSessionIds).toEqual([sessionId])
+    expect(degradedById.get(firstExactSessionId)).toMatchObject({
+      freshness: "stale",
+      provenance: {
+        _tag: "Retained",
+        reason: "source-unavailable",
+      },
+      sourceUpdatedAtMs: 1_000,
+      observedAtMs: 3_000,
+      commitSequence: 5,
+    })
+    expect(degradedById.get(secondExactSessionId)).toEqual(
+      baselineById.get(secondExactSessionId),
+    )
+  }),
+)
+
+it.effect("retains unsupported regressed evidence without overwriting the last supported fact", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
 
@@ -739,89 +995,45 @@ it.effect("recovers a source-lost poll on reconnect and resumes exact-identity p
     const firstObserved = yield* Deferred.make<void>()
     const collected = yield* packWalk.events.pipe(
       Stream.tap(() => Deferred.succeed(firstObserved, undefined)),
-      Stream.take(2),
+      Stream.take(3),
       Stream.runCollect,
       Effect.forkChild,
     )
-
     yield* Deferred.await(firstObserved)
-    yield* packWalk.loseSourceForTest
+    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 500 })
+    yield* TestClock.adjust("1 second")
+    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 1_000 })
     yield* TestClock.adjust("1 second")
 
     const events = Array.from(yield* Fiber.join(collected))
-    expect(events[0]?._tag).toBe("SessionsSnapshot")
-    expect(events[1]).toEqual({
-      _tag: "SessionUnavailable",
-      protocolVersion: 2,
-      code: "source-unavailable",
-      message: "PackWalk could not read supported Codex persisted evidence",
-    })
-
-    yield* packWalk.restoreSourceForTest
-    const recoveredObserved = yield* Deferred.make<void>()
-    const recovered = yield* packWalk.events.pipe(
-      Stream.tap((event) =>
-        event._tag === "SessionsSnapshot"
-          ? Deferred.succeed(recoveredObserved, undefined)
-          : Effect.void,
-      ),
-      Stream.take(2),
-      Stream.runCollect,
-      Effect.forkChild,
-    )
-
-    yield* Deferred.await(recoveredObserved)
-    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 2_500 })
-    yield* TestClock.adjust("1 second")
-
-    const recoveredEvents = Array.from(yield* Fiber.join(recovered))
-    expect(recoveredEvents[0]).toMatchObject({
-      _tag: "SessionsSnapshot",
-      views: [{
-        sessionId,
-        projectIdentity: "fixture-project",
-        state: { _tag: "Discovered" },
-        sourceUpdatedAtMs: 1_000,
-        commitSequence: 1,
-      }],
-    })
-    expect(recoveredEvents[1]).toMatchObject({
+    expect(events[1]).toMatchObject({
       _tag: "SessionsUpdated",
+      protocolVersion: 3,
       views: [{
         sessionId,
-        projectIdentity: "fixture-project",
-        state: { _tag: "Polled" },
-        sourceUpdatedAtMs: 2_500,
-        observedAtMs: 4_000,
+        freshness: "stale",
+        provenance: {
+          _tag: "Retained",
+          reason: "source-unsupported",
+        },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 2_000,
         commitSequence: 2,
       }],
+      changedSessionIds: [sessionId],
     })
-  }),
-)
-
-it.effect("surfaces an unrecoverable polling worker failure to the daemon owner", () =>
-  Effect.gen(function* () {
-    yield* TestClock.setTime(2_000)
-
-    const packWalk = yield* makeDeterministicPackWalk({
-      version: 1,
-      sessionId,
-      projectIdentity: "fixture-project",
-      sourceUpdatedAtMs: 1_000,
-    })
-    const first = yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect)
-    expect(Array.from(first)[0]?._tag).toBe("SessionsSnapshot")
-
-    const runtimeFailure = yield* packWalk.lifetime.pipe(
-      Effect.flip,
-      Effect.forkChild,
-    )
-    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 500 })
-    yield* TestClock.adjust("1 second")
-
-    expect(yield* Fiber.join(runtimeFailure)).toMatchObject({
-      _tag: "PackWalk.IllegalSessionTransition",
-      reason: "source-time-regressed",
+    expect(events[2]).toMatchObject({
+      _tag: "SessionsUpdated",
+      protocolVersion: 3,
+      views: [{
+        sessionId,
+        freshness: "fresh",
+        provenance: { _tag: "Observed" },
+        sourceUpdatedAtMs: 1_000,
+        observedAtMs: 4_000,
+        commitSequence: 3,
+      }],
+      changedSessionIds: [sessionId],
     })
   }),
 )

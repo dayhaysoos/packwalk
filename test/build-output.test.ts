@@ -117,16 +117,17 @@ it.runIf(nativeTempStorageQualified)(
   const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
   const event = {
     _tag: "SessionsSnapshot",
-    protocolVersion: 2,
+    protocolVersion: 3,
     views: [
       {
-        protocolVersion: 1,
+        protocolVersion: 2,
         sessionId,
         projectIdentity: "fixture-project",
         activity: "persisted Codex activity",
         evidenceSource: "codex-sqlite-thread-index",
         state: { _tag: "Discovered" },
         freshness: "fresh",
+        provenance: { _tag: "Observed" },
         sourceUpdatedAtMs: 1_000,
         observedAtMs: 2_000,
         commitSequence: 1,
@@ -207,6 +208,7 @@ it.runIf(nativeTempStorageQualified)(
     expect(text.stdout.endsWith(EOL)).toBe(true)
     expect(text.stdout.slice(0, -EOL.length).split(EOL)).toHaveLength(6)
     expect(text.stdout).toContain(sessionId)
+    expect(text.stdout).toContain("OBSERVED")
     expect(text.stdout).not.toContain("\u001B")
 
     expect(json.exitCode).toBe(0)
@@ -291,7 +293,7 @@ it.runIf(!nativeTempStorageQualified)(
       process.platform === "win32" ? "\\\\.\\pipe\\" : "/tmp"
     const listPackWalkEndpoints = (): ReadonlyArray<string> =>
       readdirSync(endpointNamespace)
-        .filter((entry) => entry.startsWith("packwalk-v2-"))
+        .filter((entry) => entry.startsWith("packwalk-v3-"))
         .sort()
     const endpointsBefore = listPackWalkEndpoints()
     const activeChildren = new Set<ChildProcess>()

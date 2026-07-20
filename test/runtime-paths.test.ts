@@ -391,10 +391,10 @@ describe("PackWalk runtime paths", () => {
       "/Users/example/Library/Application Support/PackWalk/packwalk.sqlite",
     )
     expect(paths.ipcDirectory).toMatch(
-      /^\/tmp\/packwalk-v2-[a-f0-9]{24}$/,
+      /^\/tmp\/packwalk-v3-[a-f0-9]{24}$/,
     )
     expect(paths.ipcEndpoint).toBe(
-      `${paths.ipcDirectory}/daemon-v2.sock`,
+      `${paths.ipcDirectory}/daemon-v3.sock`,
     )
   })
 
@@ -438,10 +438,10 @@ describe("PackWalk runtime paths", () => {
       "/home/example/.data/packwalk/packwalk.sqlite",
     )
     expect(paths.ipcDirectory).toMatch(
-      /^\/tmp\/packwalk-v2-[a-f0-9]{24}$/,
+      /^\/tmp\/packwalk-v3-[a-f0-9]{24}$/,
     )
     expect(paths.ipcEndpoint).toBe(
-      `${paths.ipcDirectory}/daemon-v2.sock`,
+      `${paths.ipcDirectory}/daemon-v3.sock`,
     )
   })
 
@@ -470,7 +470,7 @@ describe("PackWalk runtime paths", () => {
       "D:\\LocalData\\PackWalk\\packwalk.sqlite",
     )
     expect(paths.ipcEndpoint).toMatch(
-      /^\\\\\.\\pipe\\packwalk-v2-[a-f0-9]{24}$/,
+      /^\\\\\.\\pipe\\packwalk-v3-[a-f0-9]{24}$/,
     )
     expect(paths.ipcDirectory).toBeUndefined()
   })
@@ -507,7 +507,7 @@ describe("PackWalk runtime paths", () => {
     expect(sameDatabase.ipcEndpoint).toBe(first.ipcEndpoint)
     expect(sameDatabase.ipcDirectory).toBe(first.ipcDirectory)
     expect(differentDatabase.ipcEndpoint).not.toBe(first.ipcEndpoint)
-    expect(first.ipcDirectory).toMatch(/^\/tmp\/packwalk-v2-[a-f0-9]+$/)
+    expect(first.ipcDirectory).toMatch(/^\/tmp\/packwalk-v3-[a-f0-9]+$/)
     expect(first.ipcEndpoint.length).toBeLessThan(100)
   })
 
@@ -1012,7 +1012,7 @@ describe("PackWalk runtime paths", () => {
               ),
               packWalkDatabaseAuthority: databaseAuthority(),
               ipcDirectory,
-              ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
+              ipcEndpoint: join(ipcDirectory, "daemon-v3.sock"),
             }),
           ),
         ),
@@ -1045,7 +1045,7 @@ describe("PackWalk runtime paths", () => {
         ),
         packWalkDatabaseAuthority: databaseAuthority(),
         ipcDirectory,
-        ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
+        ipcEndpoint: join(ipcDirectory, "daemon-v3.sock"),
       })
 
       return Effect.gen(function* () {

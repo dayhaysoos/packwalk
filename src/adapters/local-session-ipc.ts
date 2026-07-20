@@ -24,7 +24,7 @@ const maximumCommandBytes = 4 * 1024
 
 export const SessionCommand = Schema.TaggedUnion({
   SubscribeSessions: {
-    protocolVersion: Schema.Literal(2),
+    protocolVersion: Schema.Literal(3),
   },
 })
 
@@ -240,7 +240,7 @@ export const connectSessionEvents = (
     const decodeFrames = yield* frameDecoder(MaximumSessionEventBytes)
     const write = yield* socket.writer
     const request = yield* Schema.encodeEffect(SessionCommandJson)(
-      SessionCommand.cases.SubscribeSessions.make({ protocolVersion: 2 }),
+      SessionCommand.cases.SubscribeSessions.make({ protocolVersion: 3 }),
     ).pipe(
       Effect.mapError(() =>
         ipcError("invalid-frame", "PackWalk could not encode its IPC request"),

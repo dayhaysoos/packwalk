@@ -71,6 +71,18 @@ it.effect("keeps two overlapping same-repository sessions distinct through IPC a
       return yield* Effect.die("Expected complete multi-session overview events")
     }
 
+    for (const event of [initial, baseline, updated]) {
+      expect(event.protocolVersion).toBe(3)
+      expect(
+        event.views.every(
+          (view) =>
+            view.protocolVersion === 2 &&
+            view.freshness === "fresh" &&
+            view.provenance._tag === "Observed",
+        ),
+      ).toBe(true)
+    }
+
     const byId = <A extends { readonly sessionId: string }>(
       views: ReadonlyArray<A>,
     ): ReadonlyMap<string, A> =>
@@ -133,7 +145,7 @@ it.effect("publishes a redacted unavailable result for duplicate exact source id
     expect(events).toEqual([
       {
         _tag: "SessionUnavailable",
-        protocolVersion: 2,
+        protocolVersion: 3,
         code: "source-ambiguous",
         message: "PackWalk found ambiguous Codex persisted evidence",
       },

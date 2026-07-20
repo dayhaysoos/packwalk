@@ -6,20 +6,21 @@ import {
   ProjectIdentity,
   SessionEvent,
   SessionIdentity,
+  SessionProvenance,
   SessionState,
   SessionView,
 } from "../src/domain/session.js"
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
 
-it.effect("writes discovered and polled public views as visibly different CLI frames", () =>
+it.effect("writes observed and retained public views as visibly different CLI frames", () =>
   Effect.gen(function* () {
     const frames = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
     const client: ClientPort = {
       writeFrame: (lines) => Ref.update(frames, (rendered) => [...rendered, lines]),
     }
     const discovered = SessionView.make({
-      protocolVersion: 1,
+      protocolVersion: 2,
       sessionId: SessionIdentity.make(sessionId),
       projectIdentity: ProjectIdentity.make(
         "C:\\work\\fixture-project",
@@ -28,6 +29,7 @@ it.effect("writes discovered and polled public views as visibly different CLI fr
       evidenceSource: "codex-sqlite-thread-index",
       state: SessionState.cases.Discovered.make({}),
       freshness: "fresh",
+      provenance: SessionProvenance.cases.Observed.make({}),
       sourceUpdatedAtMs: 1_000,
       observedAtMs: 2_000,
       commitSequence: 1,
@@ -39,33 +41,51 @@ it.effect("writes discovered and polled public views as visibly different CLI fr
       observedAtMs: 3_000,
       commitSequence: 2,
     })
+    const retained = SessionView.make({
+      ...polled,
+      freshness: "stale",
+      provenance: SessionProvenance.cases.Retained.make({
+        reason: "source-unavailable",
+      }),
+      commitSequence: 3,
+    })
 
     yield* runSessionClient(
       Stream.make(
-        SessionEvent.cases.SessionSnapshot.make({
-          protocolVersion: 1,
-          view: discovered,
+        SessionEvent.cases.SessionsSnapshot.make({
+          protocolVersion: 3,
+          views: [discovered],
         }),
-        SessionEvent.cases.SessionUpdated.make({
-          protocolVersion: 1,
-          view: polled,
+        SessionEvent.cases.SessionsUpdated.make({
+          protocolVersion: 3,
+          views: [polled],
+          changedSessionIds: [SessionIdentity.make(sessionId)],
+        }),
+        SessionEvent.cases.SessionsUpdated.make({
+          protocolVersion: 3,
+          views: [retained],
+          changedSessionIds: [SessionIdentity.make(sessionId)],
         }),
       ),
       client,
     )
 
     const rendered = yield* Ref.get(frames)
-    expect(rendered).toHaveLength(2)
+    expect(rendered).toHaveLength(3)
 
     const initial = rendered[0]?.join("\n") ?? ""
     const updated = rendered[1]?.join("\n") ?? ""
-    for (const frame of [initial, updated]) {
+    const degraded = rendered[2]?.join("\n") ?? ""
+    for (const frame of [initial, updated, degraded]) {
       expect(frame).toContain("fixture-project")
       expect(frame).toContain(sessionId)
       expect(frame).toContain("persisted Codex activity")
       expect(frame).toContain("codex-sqlite-thread-index")
-      expect(frame).toContain("fresh")
       expect(frame).not.toMatch(/\b(?:LIVE|WATCHED)\b/u)
+    }
+    for (const observed of [initial, updated]) {
+      expect(observed).toContain("fresh")
+      expect(observed).toContain("OBSERVED")
     }
     expect(initial).toContain("DISCOVERED")
     expect(initial).toContain("1970-01-01T00:00:01.000Z")
@@ -73,6 +93,8 @@ it.effect("writes discovered and polled public views as visibly different CLI fr
     expect(updated).toContain("POLLED")
     expect(updated).toContain("1970-01-01T00:00:02.500Z")
     expect(updated).toContain("1970-01-01T00:00:03.000Z")
+    expect(degraded).toContain("stale")
+    expect(degraded).toContain("RETAINED (source-unavailable)")
   }),
 )
 
@@ -83,13 +105,14 @@ it.effect("makes subsecond polling updates visibly distinct", () =>
       writeFrame: (lines) => Ref.update(frames, (rendered) => [...rendered, lines]),
     }
     const first = SessionView.make({
-      protocolVersion: 1,
+      protocolVersion: 2,
       sessionId: SessionIdentity.make(sessionId),
       projectIdentity: ProjectIdentity.make("fixture-project"),
       activity: "persisted Codex activity",
       evidenceSource: "codex-sqlite-thread-index",
       state: SessionState.cases.Polled.make({}),
       freshness: "fresh",
+      provenance: SessionProvenance.cases.Observed.make({}),
       sourceUpdatedAtMs: 2_500,
       observedAtMs: 2_750,
       commitSequence: 2,
@@ -103,8 +126,15 @@ it.effect("makes subsecond polling updates visibly distinct", () =>
 
     yield* runSessionClient(
       Stream.make(
-        SessionEvent.cases.SessionSnapshot.make({ protocolVersion: 1, view: first }),
-        SessionEvent.cases.SessionUpdated.make({ protocolVersion: 1, view: second }),
+        SessionEvent.cases.SessionsSnapshot.make({
+          protocolVersion: 3,
+          views: [first],
+        }),
+        SessionEvent.cases.SessionsUpdated.make({
+          protocolVersion: 3,
+          views: [second],
+          changedSessionIds: [SessionIdentity.make(sessionId)],
+        }),
       ),
       client,
     )
@@ -127,13 +157,14 @@ it.effect("escapes every visible identity without truncating source details", ()
     const projectIdentity = "/work/repo\r\n"
     const controlledSessionId = "session\t\u0000\u007f"
     const view = SessionView.make({
-      protocolVersion: 1,
+      protocolVersion: 2,
       sessionId: SessionIdentity.make(controlledSessionId),
       projectIdentity: ProjectIdentity.make(projectIdentity),
       activity: "persisted Codex activity",
       evidenceSource: "codex-sqlite-thread-index",
       state: SessionState.cases.Discovered.make({}),
       freshness: "fresh",
+      provenance: SessionProvenance.cases.Observed.make({}),
       sourceUpdatedAtMs: 1_000,
       observedAtMs: 2_000,
       commitSequence: 1,
@@ -141,7 +172,10 @@ it.effect("escapes every visible identity without truncating source details", ()
 
     yield* runSessionClient(
       Stream.make(
-        SessionEvent.cases.SessionSnapshot.make({ protocolVersion: 1, view }),
+        SessionEvent.cases.SessionsSnapshot.make({
+          protocolVersion: 3,
+          views: [view],
+        }),
       ),
       client,
     )
@@ -151,6 +185,7 @@ it.effect("escapes every visible identity without truncating source details", ()
     expect(rendered).toContain("session\\\\u0009\\\\u0000\\\\u007F")
     expect(rendered).toContain("codex-sqlite-thread-index")
     expect(rendered).toContain("fresh")
+    expect(rendered).toContain("OBSERVED")
     expect(rendered).not.toContain(controlledSessionId)
     expect(view.projectIdentity).toBe(projectIdentity)
     expect(view.sessionId).toBe(controlledSessionId)
@@ -165,13 +200,14 @@ it.effect("keeps a complete project component and a useful root fallback", () =>
     }
     const makeView = (projectIdentity: string) =>
       SessionView.make({
-        protocolVersion: 1,
+        protocolVersion: 2,
         sessionId: SessionIdentity.make(sessionId),
         projectIdentity: ProjectIdentity.make(projectIdentity),
         activity: "persisted Codex activity",
         evidenceSource: "codex-sqlite-thread-index",
         state: SessionState.cases.Discovered.make({}),
         freshness: "fresh",
+        provenance: SessionProvenance.cases.Observed.make({}),
         sourceUpdatedAtMs: 1_000,
         observedAtMs: 2_000,
         commitSequence: 1,
@@ -179,13 +215,13 @@ it.effect("keeps a complete project component and a useful root fallback", () =>
 
     yield* runSessionClient(
       Stream.make(
-        SessionEvent.cases.SessionSnapshot.make({
-          protocolVersion: 1,
-          view: makeView("/work/repository-with-very-long-name"),
+        SessionEvent.cases.SessionsSnapshot.make({
+          protocolVersion: 3,
+          views: [makeView("/work/repository-with-very-long-name")],
         }),
-        SessionEvent.cases.SessionSnapshot.make({
-          protocolVersion: 1,
-          view: makeView("/"),
+        SessionEvent.cases.SessionsSnapshot.make({
+          protocolVersion: 3,
+          views: [makeView("/")],
         }),
       ),
       client,
@@ -209,7 +245,7 @@ it.effect("renders unavailable as one redacted table row", () =>
     yield* runSessionClient(
       Stream.make(
         SessionEvent.cases.SessionUnavailable.make({
-          protocolVersion: 1,
+          protocolVersion: 3,
           code: "source-incompatible",
           message: "PackWalk could not read supported Codex persisted evidence",
         }),

@@ -17,6 +17,7 @@ import {
   type ProjectIdentity as ProjectIdentityValue,
   SessionIdentity,
   type SessionIdentity as SessionIdentityValue,
+  SessionProvenance,
   SessionState,
   SessionView,
 } from "../src/domain/session.js"
@@ -75,13 +76,14 @@ it.effect("round-trips branded identities through the SQLite adapter as wire str
         const storage = Context.get(context, SessionStorage)
         yield* storage.commit(0, [
           SessionView.make({
-            protocolVersion: 1,
+            protocolVersion: 2,
             sessionId,
             projectIdentity,
             activity: "persisted Codex activity",
             evidenceSource: "codex-sqlite-thread-index",
             state: SessionState.cases.Discovered.make({}),
             freshness: "fresh",
+            provenance: SessionProvenance.cases.Observed.make({}),
             sourceUpdatedAtMs: 1_000,
             observedAtMs: 2_000,
             commitSequence: 1,

@@ -71,6 +71,18 @@ its latest meaningful observation. Freshness never follows from process
 liveness alone.
 _Avoid_: Liveness, certainty
 
+**Provenance**:
+Whether a session view comes from a currently accepted observation or retains
+the last accepted structural metadata because exact evidence is temporarily
+unavailable or unsupported.
+_Avoid_: Transcript origin, inferred certainty
+
+**Retained session view**:
+A stale current projection that preserves the last supported content-free
+metadata and its observation time without merging rejected evidence. Retention
+does not claim a new Codex observation.
+_Avoid_: Fresh view, deleted session, guessed activity
+
 **Content-free evidence**:
 Structural session or action metadata that excludes prompts, responses,
 command output, diffs, terminal input, credentials, and raw Codex payloads.

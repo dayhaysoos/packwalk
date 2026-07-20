@@ -12,6 +12,7 @@ import {
   ProjectIdentity,
   SessionEvent,
   SessionIdentity,
+  SessionProvenance,
   SessionState,
   SessionView,
 } from "../src/domain/session.js"
@@ -20,32 +21,36 @@ const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
 
 const sessionEvents = () => {
   const discovered = SessionView.make({
-    protocolVersion: 1,
+    protocolVersion: 2,
     sessionId: SessionIdentity.make(sessionId),
     projectIdentity: ProjectIdentity.make("fixture-project"),
     activity: "persisted Codex activity",
     evidenceSource: "codex-sqlite-thread-index",
     state: SessionState.cases.Discovered.make({}),
     freshness: "fresh",
+    provenance: SessionProvenance.cases.Observed.make({}),
     sourceUpdatedAtMs: 1_000,
     observedAtMs: 2_000,
     commitSequence: 1,
   })
 
   return Stream.make(
-    SessionEvent.cases.SessionSnapshot.make({
-      protocolVersion: 1,
-      view: discovered,
+    SessionEvent.cases.SessionsSnapshot.make({
+      protocolVersion: 3,
+      views: [discovered],
     }),
-    SessionEvent.cases.SessionUpdated.make({
-      protocolVersion: 1,
-      view: SessionView.make({
-        ...discovered,
-        state: SessionState.cases.Polled.make({}),
-        sourceUpdatedAtMs: 2_500,
-        observedAtMs: 3_000,
-        commitSequence: 2,
-      }),
+    SessionEvent.cases.SessionsUpdated.make({
+      protocolVersion: 3,
+      views: [
+        SessionView.make({
+          ...discovered,
+          state: SessionState.cases.Polled.make({}),
+          sourceUpdatedAtMs: 2_500,
+          observedAtMs: 3_000,
+          commitSequence: 2,
+        }),
+      ],
+      changedSessionIds: [SessionIdentity.make(sessionId)],
     }),
   )
 }
@@ -199,13 +204,13 @@ it.effect("redraws a later terminal frame in place", () =>
   }),
 )
 
-it.effect("redraws complete session frames on an 80-column terminal", () =>
+it.effect("redraws complete session frames on a wide terminal", () =>
   Effect.gen(function* () {
     const bytes = yield* Ref.make("")
     const output = yield* makePlainCliOutputWith({
       isTerminal: true,
       supportsCursorMovement: true,
-      columns: () => 80,
+      columns: () => 120,
     }).pipe(
       Effect.provide(
         Stdio.layerTest({
@@ -224,6 +229,7 @@ it.effect("redraws complete session frames on an 80-column terminal", () =>
     expect(rendered.split("\r\u001B[2K")).toHaveLength(7)
     expect(rendered.match(new RegExp(sessionId, "gu"))).toHaveLength(2)
     expect(rendered).toContain("codex-sqlite-thread-index")
+    expect(rendered).toContain("OBSERVED")
     expect(rendered).toContain("1970-01-01T00:00:01.000Z")
     expect(rendered).toContain("1970-01-01T00:00:02.500Z")
     expect(rendered).toContain("1970-01-01T00:00:03.000Z")

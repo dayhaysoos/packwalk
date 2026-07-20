@@ -71,11 +71,11 @@ npm run packwalk
 That command builds the package binary, starts or connects to the PackWalk
 daemon automatically, and opens the plain CLI view. Do not start a separate
 daemon. The view shows project, exact Codex session identity, supported
-activity, evidence source, freshness, millisecond source-update time, PackWalk
-observation time, and honest state for every supported row. A singleton keeps
-the compact six-line layout; an overview groups one row per session under each
-field heading. Exact Codex identity remains authoritative even when two rows
-share a repository or display label. Note one row's `SESSION` and `SOURCE
+activity, evidence source, freshness, provenance, millisecond source-update
+time, PackWalk observation time, and honest state for every supported row. A
+singleton keeps the compact six-line layout; an overview groups one row per
+session under each field heading. Exact Codex identity remains authoritative
+even when two rows share a repository or display label. Note one row's `SESSION` and `SOURCE
 UPDATED`, then complete another turn in that same Codex session. After Codex
 persists the change and polling observes it, PackWalk keeps every `SESSION`
 distinct, shows the changed row as `POLLED`, and renders its later `SOURCE
@@ -95,7 +95,8 @@ npm run --silent packwalk -- json
 
 `text` emits the same complete fields without terminal cursor controls. `json`
 emits the daemon's versioned Effect-Schema event: an available result is a
-protocol-v2 `SessionsSnapshot` with a required nonempty `views` collection,
+protocol-v3 `SessionsSnapshot` containing protocol-v2 views in a required
+nonempty `views` collection,
 while an unavailable source is a `SessionUnavailable` with a required redacted
 `code` and `message`. Committed polling normally emits `SessionsUpdated` with
 the complete overview plus exact `changedSessionIds`. If that richer envelope
@@ -110,9 +111,15 @@ connection or daemon failure, an empty stream, encoding failure, or output
 failure emits one redacted error to stderr and exits nonzero. Neither command
 reads Codex or PackWalk SQLite directly.
 
-Protocol-v2 overview clients use a versioned per-user local endpoint. A
-persistent protocol-v1 daemon is neither killed nor mistaken for the current
-overview service, and the v2 client never falls back to its singleton result.
+Protocol-v3 overview clients use a versioned per-user local endpoint and never
+fall back to older events. The authoritative database remains
+`packwalk-v2.sqlite`; its checked storage-v3 migration preserves protocol-v2
+rows and takes an SQLite-aware pre-migration backup. A persistent protocol-v2
+daemon must release that shared database before the v3 daemon can migrate it.
+PackWalk fails closed rather than killing the old daemon or opening a second
+writer; generic upgrade recovery remains Ticket 08 work. A persistent
+protocol-v1 daemon uses its separate legacy database and is neither killed nor
+mistaken for the current overview service.
 The client transport is not the database-writer lock: the daemon first retains
 exclusive locking mode on its one scoped PackWalk SQLite connection, then
 claims the Unix socket or Windows named pipe. Those endpoints are transport
@@ -138,12 +145,22 @@ A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live
 attachment or direct control.
 
+If an exact persisted source temporarily disappears, PackWalk keeps the last
+committed structural metadata, marks it `stale`, and shows `RETAINED
+(source-unavailable)` provenance. Rejected or regressed exact evidence is
+retained as `source-unsupported` without merging the rejected payload. A later
+valid read becomes one new `fresh`/`OBSERVED` commit even when the underlying
+source timestamp is unchanged; repeated loss, recovery, restart, and reconnect
+do not invent additional commits. Polling remains delayed persisted
+observation, not live or real-time attachment.
+
 The maintainer accepted the corrected Ticket 01 real-session presentation and
 reconnect recovery after one continuously running CLI kept the same exact
-session and redrew a later committed source timestamp in place. Ticket 04 now
-implements the multi-session shape and is awaiting its independent review
-gates. The view still has non-blocking visual-hierarchy feedback for a separate
-readability slice. See [current state](docs/current-state.md), [Ticket
+session and redrew a later committed source timestamp in place. Ticket 04's
+multi-session shape is resolved and integrated. Ticket 05's durable restoration
+and retained-evidence implementation is undergoing its review gates. The view
+still has non-blocking visual-hierarchy feedback for a separate readability
+slice. See [current state](docs/current-state.md), [Ticket
 01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md),
 and [Ticket
 04](.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md).
@@ -184,6 +201,7 @@ turn in Codex and does not require special Codex launch options.
 - [First implementation ticket](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
 - [Text and JSON output ticket](.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
 - [Multi-session identity ticket](.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
+- [Restoration and degradation ticket](.scratch/packwalk-post-launch-orientation/issues/05-restore-and-degrade-the-overview-safely.md)
 
 ## Source availability
 

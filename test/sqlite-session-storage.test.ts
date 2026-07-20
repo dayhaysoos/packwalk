@@ -21,6 +21,7 @@ import {
 import {
   ProjectIdentity,
   SessionIdentity,
+  SessionProvenance,
   SessionState,
   SessionView,
 } from "../src/domain/session.js"
@@ -59,7 +60,7 @@ const makeSessionView = (
   state: "Discovered" | "Polled" = "Discovered",
 ) =>
   SessionView.make({
-    protocolVersion: 1,
+    protocolVersion: 2,
     sessionId: SessionIdentity.make(sessionId),
     projectIdentity: ProjectIdentity.make("shared-fixture-project"),
     activity: "persisted Codex activity",
@@ -69,10 +70,171 @@ const makeSessionView = (
         ? SessionState.cases.Discovered.make({})
         : SessionState.cases.Polled.make({}),
     freshness: "fresh",
+    provenance: SessionProvenance.cases.Observed.make({}),
     sourceUpdatedAtMs,
     observedAtMs,
     commitSequence,
   })
+
+const seedVersion2Storage = (path: string, row: StoredSessionRow) => {
+  const database = new DatabaseSync(path)
+  try {
+    database.exec(`
+      CREATE TABLE current_sessions (
+        session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
+          length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
+        ),
+        protocol_version INTEGER NOT NULL CHECK (protocol_version = 1),
+        project_identity TEXT NOT NULL CHECK (
+          length(CAST(project_identity AS BLOB)) BETWEEN 1 AND 4096
+        ),
+        activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
+        evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
+        state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
+        freshness TEXT NOT NULL CHECK (freshness = 'fresh'),
+        source_updated_at_ms INTEGER NOT NULL CHECK (
+          source_updated_at_ms >= 0 AND
+          source_updated_at_ms <= 8640000000000000
+        ),
+        observed_at_ms INTEGER NOT NULL CHECK (
+          observed_at_ms >= 0 AND
+          observed_at_ms <= 8640000000000000
+        ),
+        commit_sequence INTEGER NOT NULL UNIQUE CHECK (
+          commit_sequence >= 1 AND commit_sequence <= 9007199254740991
+        )
+      );
+      CREATE TABLE storage_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        last_commit_sequence INTEGER NOT NULL CHECK (
+          last_commit_sequence >= 0 AND
+          last_commit_sequence <= 9007199254740991
+        )
+      );
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        checksum TEXT NOT NULL CHECK (length(checksum) > 0)
+      );
+    `)
+    database
+      .prepare(`
+        INSERT INTO current_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        row.sessionId,
+        row.protocolVersion,
+        row.projectIdentity,
+        row.activity,
+        row.evidenceSource,
+        row.stateTag,
+        row.freshness,
+        row.sourceUpdatedAtMs,
+        row.observedAtMs,
+        row.commitSequence,
+      )
+    database
+      .prepare("INSERT INTO storage_state VALUES (1, ?)")
+      .run(row.commitSequence)
+    database
+      .prepare("INSERT INTO schema_migrations VALUES (2, ?)")
+      .run("a4c7d933c09ca96f969b1961c901975c2892b320155798ccd0c633a536f1e9da")
+  } finally {
+    database.close()
+  }
+}
+
+it.effect("upgrades a version-2 overview without inventing an observation", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-storage-v3-test-"))),
+      (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+    )
+    const path = join(directory, "packwalk-v2.sqlite")
+    const prior = { ...validRow, stateTag: "Polled", commitSequence: 7 }
+    yield* Effect.sync(() => seedVersion2Storage(path, prior))
+
+    const storageScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(storageScope, Exit.void))
+    const context = yield* Layer.buildWithScope(
+      sqliteSessionStorageLayer(path),
+      storageScope,
+    )
+    const storage = Context.get(context, SessionStorage)
+
+    expect(yield* storage.load()).toEqual({
+      views: [{
+        protocolVersion: 2,
+        sessionId: prior.sessionId,
+        projectIdentity: prior.projectIdentity,
+        activity: prior.activity,
+        evidenceSource: prior.evidenceSource,
+        state: { _tag: "Polled" },
+        freshness: "fresh",
+        provenance: { _tag: "Observed" },
+        sourceUpdatedAtMs: prior.sourceUpdatedAtMs,
+        observedAtMs: prior.observedAtMs,
+        commitSequence: prior.commitSequence,
+      }],
+      lastCommitSequence: prior.commitSequence,
+    })
+    yield* Scope.close(storageScope, Exit.void)
+
+    const migrated = new DatabaseSync(path, { readOnly: true })
+    try {
+      expect(
+        migrated
+          .prepare("SELECT version, checksum FROM schema_migrations ORDER BY version")
+          .all(),
+      ).toEqual([
+        { version: 2, checksum: "a4c7d933c09ca96f969b1961c901975c2892b320155798ccd0c633a536f1e9da" },
+        { version: 3, checksum: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      ])
+      expect(
+        migrated
+          .prepare(`
+            SELECT protocol_version, freshness, provenance_tag, retention_reason,
+              source_updated_at_ms, observed_at_ms, commit_sequence
+            FROM current_sessions
+          `)
+          .get(),
+      ).toEqual({
+        protocol_version: 2,
+        freshness: "fresh",
+        provenance_tag: "Observed",
+        retention_reason: null,
+        source_updated_at_ms: prior.sourceUpdatedAtMs,
+        observed_at_ms: prior.observedAtMs,
+        commit_sequence: prior.commitSequence,
+      })
+    } finally {
+      migrated.close()
+    }
+
+    const backupDatabase = new DatabaseSync(
+      `${path}.pre-migration-v3.sqlite`,
+      { readOnly: true },
+    )
+    try {
+      expect(
+        backupDatabase
+          .prepare("SELECT protocol_version, freshness, commit_sequence FROM current_sessions")
+          .get(),
+      ).toEqual({
+        protocol_version: 1,
+        freshness: "fresh",
+        commit_sequence: prior.commitSequence,
+      })
+      expect(
+        backupDatabase
+          .prepare("SELECT name FROM pragma_table_info('current_sessions') WHERE name = 'provenance_tag'")
+          .get(),
+      ).toBeUndefined()
+    } finally {
+      backupDatabase.close()
+    }
+  }),
+  30_000,
+)
 
 const seedLooseSessionTable = (path: string, row: StoredSessionRow) => {
   const database = new DatabaseSync(path)
@@ -181,13 +343,14 @@ it.effect("preserves a valid legacy session with a checked migration and SQLite 
     expect(yield* storage.load()).toEqual({
       views: [
         {
-          protocolVersion: legacyRow.protocolVersion,
+          protocolVersion: 2,
           sessionId: legacyRow.sessionId,
           projectIdentity: legacyRow.projectIdentity,
           activity: legacyRow.activity,
           evidenceSource: legacyRow.evidenceSource,
           state: { _tag: legacyRow.stateTag },
           freshness: legacyRow.freshness,
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: legacyRow.sourceUpdatedAtMs,
           observedAtMs: legacyRow.observedAtMs,
           commitSequence: legacyRow.commitSequence,
@@ -483,13 +646,14 @@ it.effect("resumes import when a retained migration backup already exists", () =
     expect(yield* storage.load()).toEqual({
       views: [
         {
-          protocolVersion: legacyRow.protocolVersion,
+          protocolVersion: 2,
           sessionId: legacyRow.sessionId,
           projectIdentity: legacyRow.projectIdentity,
           activity: legacyRow.activity,
           evidenceSource: legacyRow.evidenceSource,
           state: { _tag: legacyRow.stateTag },
           freshness: legacyRow.freshness,
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: legacyRow.sourceUpdatedAtMs,
           observedAtMs: legacyRow.observedAtMs,
           commitSequence: legacyRow.commitSequence,
@@ -911,13 +1075,14 @@ it.effect("serializes first-start legacy import under the retained storage autho
     expect(yield* storage.load()).toEqual({
       views: [
         {
-          protocolVersion: legacyRow.protocolVersion,
+          protocolVersion: 2,
           sessionId: legacyRow.sessionId,
           projectIdentity: legacyRow.projectIdentity,
           activity: legacyRow.activity,
           evidenceSource: legacyRow.evidenceSource,
           state: { _tag: legacyRow.stateTag },
           freshness: legacyRow.freshness,
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: legacyRow.sourceUpdatedAtMs,
           observedAtMs: legacyRow.observedAtMs,
           commitSequence: legacyRow.commitSequence,

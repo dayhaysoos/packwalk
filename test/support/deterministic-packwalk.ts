@@ -55,6 +55,34 @@ export interface DeterministicPackWalk {
   ) => Effect.Effect<void>
   readonly loseSourceForTest: Effect.Effect<void>
   readonly restoreSourceForTest: Effect.Effect<void>
+  readonly loseExactSourceForTest: (
+    sessionId: string,
+  ) => Effect.Effect<void, SessionSourceError>
+  readonly restoreExactSourceForTest: (
+    sessionId: string,
+  ) => Effect.Effect<void>
+}
+
+export interface RestartableDeterministicPackWalk {
+  readonly events: Stream.Stream<SessionEvent, LocalIpcError>
+  readonly startDaemonIn: (
+    scope: Scope.Scope,
+  ) => Effect.Effect<Effect.Effect<never, SessionDaemonFailure>, unknown>
+  readonly persistSourceUpdate: PersistSourceUpdate
+  readonly persistSourceIdentityForTest: (
+    sessionId: string,
+  ) => Effect.Effect<void, SessionSourceError>
+  readonly persistSourceFactForTest: (
+    fact: unknown,
+  ) => Effect.Effect<void>
+  readonly loseSourceForTest: Effect.Effect<void>
+  readonly restoreSourceForTest: Effect.Effect<void>
+  readonly loseExactSourceForTest: (
+    sessionId: string,
+  ) => Effect.Effect<void, SessionSourceError>
+  readonly restoreExactSourceForTest: (
+    sessionId: string,
+  ) => Effect.Effect<void>
 }
 
 export interface DeterministicPackWalkOptions {
@@ -88,16 +116,23 @@ const sourceError = (
 const asFactInputs = (input: unknown): ReadonlyArray<unknown> =>
   Array.isArray(input) ? input : [input]
 
-export const makeDeterministicPackWalk = (
+export const makeRestartableDeterministicPackWalk = (
   initial: unknown,
   options: DeterministicPackWalkOptions = {},
-): Effect.Effect<DeterministicPackWalk, unknown, Scope.Scope> =>
+): Effect.Effect<
+  RestartableDeterministicPackWalk,
+  unknown,
+  Scope.Scope
+> =>
   Effect.gen(function* () {
     const factRef = yield* Ref.make<ReadonlyArray<unknown>>(
       asFactInputs(initial),
     )
     const violateExactPollIdentityForTest = yield* Ref.make(false)
     const sourceAvailable = yield* Ref.make(true)
+    const unavailableSessionIds = yield* Ref.make<ReadonlySet<string>>(
+      new Set(),
+    )
     const directory = yield* Effect.acquireRelease(
       Effect.sync(() => mkdtempSync(join(tmpdir(), "packwalk-test-"))),
       (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
@@ -144,9 +179,26 @@ export const makeDeterministicPackWalk = (
       return match
     })
 
+    const discover = Effect.fn("SessionSource.Test.discover")(function* () {
+      const facts = yield* readAll()
+      const unavailable = yield* Ref.get(unavailableSessionIds)
+      const available = facts.filter((fact) => !unavailable.has(fact.sessionId))
+      const first = available[0]
+      if (first === undefined) return yield* sourceError("unavailable")
+      return [first, ...available.slice(1)] as const
+    })
+
+    const poll = Effect.fn("SessionSource.Test.poll")(function* (
+      sessionId: typeof SessionIdentity.Type,
+    ) {
+      const unavailable = yield* Ref.get(unavailableSessionIds)
+      if (unavailable.has(sessionId)) return yield* sourceError("unavailable")
+      return yield* readExact(sessionId)
+    })
+
     const source: SessionSourceInterface = {
-      discover: () => requireAvailable(readAll()),
-      poll: (sessionId) => requireAvailable(readExact(sessionId)),
+      discover: () => requireAvailable(discover()),
+      poll: (sessionId) => requireAvailable(poll(sessionId)),
     }
 
     const sourceLayer = Layer.succeed(SessionSource, SessionSource.of(source))
@@ -178,18 +230,20 @@ export const makeDeterministicPackWalk = (
               })
             }),
           ).pipe(Layer.provide(realStorageLayer))
-    const dependencies = Layer.mergeAll(
-      sourceLayer,
-      storageLayer,
-    )
     const endpoint =
       process.platform === "win32"
         ? `\\\\.\\pipe\\packwalk-test-${randomUUID()}`
         : join(directory, "daemon.sock")
-    const daemonContext = yield* Layer.build(
-      sessionDaemonLayer(endpoint).pipe(Layer.provide(dependencies)),
+    const startDaemonIn = Effect.fn("PackWalkTest.startDaemonIn")(
+      function* (scope: Scope.Scope) {
+        const dependencies = Layer.mergeAll(sourceLayer, storageLayer)
+        const daemonContext = yield* Layer.buildWithScope(
+          sessionDaemonLayer(endpoint).pipe(Layer.provide(dependencies)),
+          scope,
+        )
+        return Context.get(daemonContext, SessionDaemon).lifetime
+      },
     )
-    const daemon = Context.get(daemonContext, SessionDaemon)
 
     const persistSourceUpdate: PersistSourceUpdate = (
       sessionIdOrUpdate: string | SourceUpdate,
@@ -256,14 +310,48 @@ export const makeDeterministicPackWalk = (
       yield* Ref.set(violateExactPollIdentityForTest, true)
     })
 
+    const loseExactSourceForTest = Effect.fn(
+      "SessionSource.Test.loseExact",
+    )(function* (sessionId: string) {
+      const facts = yield* readAll()
+      if (!facts.some((fact) => sameSessionIdentity(fact.sessionId, sessionId))) {
+        return yield* sourceError("invalid-evidence")
+      }
+      yield* Ref.update(
+        unavailableSessionIds,
+        (current) => new Set([...current, sessionId]),
+      )
+    })
+    const restoreExactSourceForTest = (sessionId: string) =>
+      Ref.update(unavailableSessionIds, (current) => {
+        const next = new Set(current)
+        next.delete(sessionId)
+        return next
+      })
     return {
       events: Stream.unwrap(connectSessionEvents(endpoint)),
-      lifetime: daemon.lifetime,
+      startDaemonIn,
       persistSourceUpdate,
       persistSourceIdentityForTest,
       persistSourceFactForTest: (fact) =>
         Ref.set(factRef, asFactInputs(fact)),
       loseSourceForTest: Ref.set(sourceAvailable, false),
       restoreSourceForTest: Ref.set(sourceAvailable, true),
+      loseExactSourceForTest,
+      restoreExactSourceForTest,
     }
+  })
+
+export const makeDeterministicPackWalk = (
+  initial: unknown,
+  options: DeterministicPackWalkOptions = {},
+): Effect.Effect<DeterministicPackWalk, unknown, Scope.Scope> =>
+  Effect.gen(function* () {
+    const fixture = yield* makeRestartableDeterministicPackWalk(
+      initial,
+      options,
+    )
+    const scope = yield* Scope.Scope
+    const lifetime = yield* fixture.startDaemonIn(scope)
+    return { ...fixture, lifetime }
   })

@@ -21,16 +21,17 @@ import {
   type SessionStorageSnapshot,
 } from "./session-storage.js"
 import {
+  degradeSession,
   encodeSessionProtocolEvent,
   matchTransition,
   matchSessionTransitionTrigger,
   sameSessionIdentity,
   type IllegalSessionTransition,
-  SessionEvent,
   SessionProtocolEvent,
   SessionTransitionTrigger,
   type CodexPersistedFact,
   type SessionIdentity,
+  type SessionRetentionReason,
   type SessionView,
   transitionSession,
 } from "../domain/session.js"
@@ -59,6 +60,11 @@ interface ObservationDecision {
   readonly lastCommitSequence: number
 }
 
+interface ExactPollOutcome {
+  readonly view: SessionView
+  readonly result: Result.Result<CodexPersistedFact, SessionSourceError>
+}
+
 const sourceUnavailableEvent = (
   code:
     | "source-incompatible"
@@ -67,26 +73,26 @@ const sourceUnavailableEvent = (
 ): SessionProtocolEvent =>
   code === "source-ambiguous"
     ? SessionProtocolEvent.cases.SessionUnavailable.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         code,
         message: "PackWalk found ambiguous Codex persisted evidence",
       })
     : SessionProtocolEvent.cases.SessionUnavailable.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         code,
         message: "PackWalk could not read supported Codex persisted evidence",
       })
 
 const storageUnavailableEvent = (): SessionProtocolEvent =>
   SessionProtocolEvent.cases.SessionUnavailable.make({
-    protocolVersion: 2,
+    protocolVersion: 3,
     code: "storage-unavailable",
     message: "PackWalk could not commit its current session view",
   })
 
 const overviewUnavailableEvent = (): SessionProtocolEvent =>
   SessionProtocolEvent.cases.SessionUnavailable.make({
-    protocolVersion: 2,
+    protocolVersion: 3,
     code: "overview-unavailable",
     message: "PackWalk could not publish its current session overview",
   })
@@ -108,8 +114,8 @@ const asCurrentSnapshot = (
 ): SessionProtocolEvent => {
   switch (event._tag) {
     case "SessionsUpdated":
-      return SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 2,
+      return SessionProtocolEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 3,
         views: event.views,
       })
     case "SessionsSnapshot":
@@ -297,11 +303,87 @@ const reduceObservation = Effect.fn("SessionSurface.reduceObservation")(
   },
 )
 
+const retentionReason = (
+  error: SessionSourceError,
+): SessionRetentionReason =>
+  error.code === "unavailable"
+    ? "source-unavailable"
+    : "source-unsupported"
+
+const reducePolling = Effect.fn("SessionSurface.reducePolling")(
+  function* (
+    current: SessionStorageSnapshot,
+    outcomes: ReadonlyArray<ExactPollOutcome>,
+    observedAtMs: number,
+  ) {
+    const nextByIdentity = new Map(
+      current.views.map((view) => [view.sessionId, view] as const),
+    )
+    const changedViews: Array<SessionView> = []
+    const changedSessionIds: Array<SessionIdentity> = []
+    let lastCommitSequence = current.lastCommitSequence
+
+    for (const outcome of outcomes) {
+      const transition = Result.isFailure(outcome.result)
+        ? degradeSession(
+            outcome.view,
+            retentionReason(outcome.result.failure),
+            lastCommitSequence + 1,
+          )
+        : (() => {
+            const observed = transitionSession(
+              Option.some(outcome.view),
+              outcome.result.success,
+              observedAtMs,
+              SessionTransitionTrigger.Polling(),
+              lastCommitSequence + 1,
+            )
+            return Result.isFailure(observed)
+              ? degradeSession(
+                  outcome.view,
+                  "source-unsupported",
+                  lastCommitSequence + 1,
+                )
+              : observed.success
+          })()
+
+      yield* matchTransition(transition, {
+        NoChange: () => Effect.void,
+        Changed: ({ view }) =>
+          Effect.sync(() => {
+            lastCommitSequence = view.commitSequence
+            nextByIdentity.set(view.sessionId, view)
+            changedViews.push(view)
+            changedSessionIds.push(view.sessionId)
+          }),
+      })
+    }
+
+    const orderedViews = Array.from(nextByIdentity.values()).sort(
+      exactIdentityOrder,
+    )
+    const firstView = orderedViews[0]
+    if (firstView === undefined) {
+      return yield* new SessionSourceError({
+        code: "unavailable",
+        message: "Codex persisted evidence is unavailable",
+      })
+    }
+
+    return {
+      views: [firstView, ...orderedViews.slice(1)],
+      changedViews,
+      changedSessionIds,
+      lastCommitSequence,
+    } satisfies ObservationDecision
+  },
+)
+
 const snapshotEvent = (
   views: NonEmptyReadonlyArray<SessionView>,
 ): SessionProtocolEvent =>
-  SessionEvent.cases.SessionsSnapshot.make({
-    protocolVersion: 2,
+  SessionProtocolEvent.cases.SessionsSnapshot.make({
+    protocolVersion: 3,
     views,
   })
 
@@ -311,8 +393,8 @@ const updatedEvent = (
   const firstChanged = decision.changedSessionIds[0]
   if (firstChanged === undefined) return snapshotEvent(decision.views)
 
-  return SessionEvent.cases.SessionsUpdated.make({
-    protocolVersion: 2,
+  return SessionProtocolEvent.cases.SessionsUpdated.make({
+    protocolVersion: 3,
     views: decision.views,
     changedSessionIds: [
       firstChanged,
@@ -344,32 +426,83 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const source = yield* SessionSource
     const storage = yield* SessionStorage
+    const pollExactSession = Effect.fn("SessionSurface.pollExactSession")(
+      function* (view: SessionView) {
+        const result = yield* source.poll(view.sessionId).pipe(Effect.result)
+        if (
+          Result.isSuccess(result) &&
+          !sameSessionIdentity(view.sessionId, result.success.sessionId)
+        ) {
+          return {
+            view,
+            result: Result.fail(
+              new SessionSourceError({
+                code: "invalid-evidence",
+                message: "Codex persisted evidence is incompatible",
+              }),
+            ),
+          } satisfies ExactPollOutcome
+        }
+        return { view, result } satisfies ExactPollOutcome
+      },
+    )
+
+    const pollCommitted = Effect.fn("SessionSurface.pollCommitted")(
+      function* (current: SessionStorageSnapshot) {
+        if (current.views.length === 0) {
+          return yield* new SessionSourceError({
+            code: "unavailable",
+            message: "Codex persisted evidence is unavailable",
+          })
+        }
+        const outcomes = yield* Effect.forEach(
+          current.views,
+          pollExactSession,
+        )
+        const observedAtMs = yield* Clock.currentTimeMillis
+        return yield* reducePolling(current, outcomes, observedAtMs)
+      },
+    )
+
+    const reconcile = Effect.fn("SessionSurface.reconcile")(function* (
+      current: SessionStorageSnapshot,
+      trigger: SessionTransitionTrigger,
+    ) {
+      if (trigger._tag === "Polling") {
+        return yield* pollCommitted(current)
+      }
+
+      const discovered = yield* source.discover().pipe(Effect.result)
+      if (Result.isFailure(discovered)) {
+        return current.views.length === 0
+          ? yield* discovered.failure
+          : yield* pollCommitted(current)
+      }
+
+      const observedAtMs = yield* Clock.currentTimeMillis
+      return yield* reduceObservation(
+        current,
+        discovered.success,
+        observedAtMs,
+        trigger,
+      )
+    })
+
     const restored = yield* storage.load()
-    const initialResult = yield* source.discover().pipe(Effect.result)
+    const initialResult = yield* reconcile(
+      restored,
+      SessionTransitionTrigger.Discovery(),
+    ).pipe(Effect.result)
     const initial = Result.isFailure(initialResult)
       ? {
-          event: sourceErrorEvent(initialResult.failure),
+          event:
+            initialResult.failure instanceof SessionSourceError
+              ? sourceErrorEvent(initialResult.failure)
+              : sourceUnavailableEvent("source-incompatible"),
           snapshot: restored,
         }
       : yield* Effect.gen(function* () {
-          const observedAtMs = yield* Clock.currentTimeMillis
-          const reducedResult = yield* reduceObservation(
-            restored,
-            initialResult.success,
-            observedAtMs,
-            SessionTransitionTrigger.Discovery(),
-          ).pipe(Effect.result)
-          if (Result.isFailure(reducedResult)) {
-            return {
-              event:
-                reducedResult.failure instanceof SessionSourceError
-                  ? sourceErrorEvent(reducedResult.failure)
-                  : sourceUnavailableEvent("source-incompatible"),
-              snapshot: restored,
-            }
-          }
-
-          const reduced = reducedResult.success
+          const reduced = initialResult.success
           const eventResult = yield* ensurePublishableEvent(
             snapshotEvent(reduced.views),
           ).pipe(Effect.result)
@@ -406,71 +539,20 @@ export const layer = Layer.effect(
       initial.snapshot,
     )
     const transitionSemaphore = yield* Semaphore.make(1)
-    const pollExactSession = Effect.fn("SessionSurface.pollExactSession")(
-      function* (view: SessionView) {
-        const fact = yield* source.poll(view.sessionId)
-        if (!sameSessionIdentity(view.sessionId, fact.sessionId)) {
-          return yield* new SessionSourceError({
-            code: "invalid-evidence",
-            message: "Codex persisted evidence is incompatible",
-          })
-        }
-        return fact
-      },
-    )
 
     const observeOnce = Effect.fn("SessionSurface.observeOnce")(function* (
       trigger: SessionTransitionTrigger,
     ) {
       const currentEvent = yield* eventState.currentEvent
       const current = yield* eventState.committed
-      const skipUnavailablePoll = matchSessionTransitionTrigger(trigger, {
-        Discovery: () => false,
-        Polling: () => currentEvent._tag === "SessionUnavailable",
-      })
-      if (skipUnavailablePoll) return
-
-      const factResult = yield* matchSessionTransitionTrigger(trigger, {
-        Discovery: () => source.discover(),
-        Polling: () =>
-          current.views.length === 0
-            ? Effect.fail(
-                new SessionSourceError({
-                  code: "unavailable",
-                  message: "Codex persisted evidence is unavailable",
-                }),
-              )
-            : Effect.forEach(current.views, (view) =>
-                pollExactSession(view),
-              ),
-      }).pipe(Effect.result)
-      if (Result.isFailure(factResult)) {
-        yield* eventState.publish(sourceErrorEvent(factResult.failure))
-        return
-      }
-
-      const observedAtMs = yield* Clock.currentTimeMillis
-      const reducedResult = yield* reduceObservation(
-        current,
-        factResult.success,
-        observedAtMs,
-        trigger,
-      ).pipe(Effect.result)
+      const reducedResult = yield* reconcile(current, trigger).pipe(
+        Effect.result,
+      )
       if (Result.isFailure(reducedResult)) {
         if (reducedResult.failure instanceof SessionSourceError) {
           yield* eventState.publish(sourceErrorEvent(reducedResult.failure))
           return
         }
-
-        const recoverableDiscoveryFailure =
-          matchSessionTransitionTrigger(trigger, {
-            Discovery: () => true,
-            Polling: () => false,
-          })
-        if (!recoverableDiscoveryFailure) {
-          return yield* reducedResult.failure
-        }
-
         yield* eventState.publish(sourceUnavailableEvent("source-incompatible"))
         return
       }

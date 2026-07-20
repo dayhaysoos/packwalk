@@ -32,13 +32,14 @@ it.effect("rejects unsafe identities and counters at owned domain boundaries", (
     ]
 
     const validView = {
-      protocolVersion: 1,
+      protocolVersion: 2,
       sessionId,
       projectIdentity: "fixture-project",
       activity: "persisted Codex activity",
       evidenceSource: "codex-sqlite-thread-index",
       state: { _tag: "Discovered" },
       freshness: "fresh",
+      provenance: { _tag: "Observed" },
       sourceUpdatedAtMs: 1_000,
       observedAtMs: 2_000,
       commitSequence: 1,
@@ -57,6 +58,21 @@ it.effect("rejects unsafe identities and counters at owned domain boundaries", (
       { ...validView, commitSequence: 0 },
       { ...validView, commitSequence: 1.5 },
       { ...validView, commitSequence: Number.MAX_SAFE_INTEGER + 1 },
+      { ...validView, freshness: "stale" },
+      {
+        ...validView,
+        provenance: { _tag: "Retained", reason: "source-unavailable" },
+      },
+      {
+        ...validView,
+        freshness: "stale",
+        provenance: { _tag: "Observed" },
+      },
+      {
+        ...validView,
+        freshness: "stale",
+        provenance: { _tag: "Retained", reason: "unknown-source-state" },
+      },
     ]
 
     for (const fact of invalidFacts) {
@@ -113,13 +129,14 @@ it.effect("accepts only timestamps representable by JavaScript Date", () =>
     const view = yield* Schema.decodeUnknownEffect(SessionView, {
       onExcessProperty: "error",
     })({
-      protocolVersion: 1,
+      protocolVersion: 2,
       sessionId,
       projectIdentity: "fixture-project",
       activity: "persisted Codex activity",
       evidenceSource: "codex-sqlite-thread-index",
       state: { _tag: "Discovered" },
       freshness: "fresh",
+      provenance: { _tag: "Observed" },
       sourceUpdatedAtMs: maximumDateTimestampMs,
       observedAtMs: maximumDateTimestampMs,
       commitSequence: 1,
@@ -145,13 +162,14 @@ it.effect("accepts only timestamps representable by JavaScript Date", () =>
       [
         SessionView,
         {
-          protocolVersion: 1,
+          protocolVersion: 2,
           sessionId,
           projectIdentity: "fixture-project",
           activity: "persisted Codex activity",
           evidenceSource: "codex-sqlite-thread-index",
           state: { _tag: "Discovered" },
           freshness: "fresh",
+          provenance: { _tag: "Observed" },
           sourceUpdatedAtMs: maximumDateTimestampMs,
           observedAtMs: maximumDateTimestampMs + 1,
           commitSequence: 1,
@@ -169,13 +187,13 @@ it.effect("accepts only timestamps representable by JavaScript Date", () =>
   }),
 )
 
-it.effect("rejects otherwise-valid protocol-v2 overviews above the public frame limit", () =>
+it.effect("rejects otherwise-valid protocol-v3 overviews above the public frame limit", () =>
   Effect.gen(function* () {
     const escapedIdentityPrefix = "\0".repeat(4_090)
     const maximumProjectIdentity = ProjectIdentity.make("\0".repeat(4_096))
     const views = Array.from({ length: 85 }, (_, index) =>
       SessionView.make({
-        protocolVersion: 1,
+        protocolVersion: 2,
         sessionId: SessionIdentity.make(
           `${escapedIdentityPrefix}${String(index).padStart(6, "0")}`,
         ),
@@ -184,6 +202,7 @@ it.effect("rejects otherwise-valid protocol-v2 overviews above the public frame 
         evidenceSource: "codex-sqlite-thread-index",
         state: SessionState.cases.Discovered.make({}),
         freshness: "fresh",
+        provenance: { _tag: "Observed" },
         sourceUpdatedAtMs: 1_000,
         observedAtMs: 2_000,
         commitSequence: index + 1,
@@ -195,12 +214,12 @@ it.effect("rejects otherwise-valid protocol-v2 overviews above the public frame 
     const overviews = [
       {
         _tag: "SessionsSnapshot",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views,
       },
       {
         _tag: "SessionsUpdated",
-        protocolVersion: 2,
+        protocolVersion: 3,
         views,
         changedSessionIds: [lastView.sessionId],
       },

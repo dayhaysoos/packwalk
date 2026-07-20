@@ -57,6 +57,7 @@ interface SessionFrameFields {
   readonly session: string
   readonly evidence: string
   readonly freshness: string
+  readonly provenance: string
   readonly sourceUpdated: string
   readonly observed: string
 }
@@ -78,11 +79,13 @@ const formatDetails = (
     ["SESSION", sessionWidth],
     ["EVIDENCE", evidenceWidth],
     ["FRESHNESS"],
+    ["PROVENANCE"],
   ]),
   formatColumns([
     [fields.session, sessionWidth],
     [fields.evidence, evidenceWidth],
     [fields.freshness],
+    [fields.provenance],
   ]),
   formatColumns([
     ["SOURCE UPDATED", sourceUpdatedWidth],
@@ -101,6 +104,10 @@ const sessionFrameFields = (view: SessionView): SessionFrameFields => ({
   session: escapeTerminalText(view.sessionId),
   evidence: view.evidenceSource,
   freshness: view.freshness,
+  provenance:
+    view.provenance._tag === "Observed"
+      ? "OBSERVED"
+      : `RETAINED (${view.provenance.reason})`,
   sourceUpdated: utcTimestamp(view.sourceUpdatedAtMs),
   observed: utcTimestamp(view.observedAtMs),
 })
@@ -131,12 +138,14 @@ const formatSessionViews = (
       ["SESSION", sessionWidth],
       ["EVIDENCE", evidenceWidth],
       ["FRESHNESS"],
+      ["PROVENANCE"],
     ]),
     ...fields.map((field) =>
       formatColumns([
         [field.session, sessionWidth],
         [field.evidence, evidenceWidth],
         [field.freshness],
+        [field.provenance],
       ]),
     ),
     formatColumns([
@@ -158,10 +167,6 @@ export const formatSessionView = (view: SessionView): ReadonlyArray<string> =>
 export const formatSessionEvent = (
   event: SessionEvent,
 ): ReadonlyArray<string> => {
-  if (event._tag === "SessionSnapshot" || event._tag === "SessionUpdated") {
-    return formatSessionView(event.view)
-  }
-
   if (event._tag === "SessionsSnapshot" || event._tag === "SessionsUpdated") {
     return formatSessionViews(event.views)
   }
@@ -173,6 +178,7 @@ export const formatSessionEvent = (
     session: "-",
     evidence: "-",
     freshness: "-",
+    provenance: "-",
     sourceUpdated: "-",
     observed: "-",
   })

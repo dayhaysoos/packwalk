@@ -134,6 +134,18 @@ realCodexTest("observes one later persisted update from an ordinary existing Cod
     expect(updatedView).toBeDefined()
     if (initialView === undefined || updatedView === undefined) return
 
+    expect(initial.protocolVersion).toBe(3)
+    expect(update.protocolVersion).toBe(3)
+    expect(initialView).toMatchObject({
+      protocolVersion: 2,
+      freshness: "fresh",
+      provenance: { _tag: "Observed" },
+    })
+    expect(updatedView).toMatchObject({
+      protocolVersion: 2,
+      freshness: "fresh",
+      provenance: { _tag: "Observed" },
+    })
     expect(initialView.projectIdentity.length > 0).toBe(true)
     expect(initialView.sessionId.length > 0).toBe(true)
     expect(updatedView.commitSequence).toBeGreaterThan(

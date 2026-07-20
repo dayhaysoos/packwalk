@@ -23,6 +23,7 @@ import {
   ProjectIdentity,
   SessionEvent,
   SessionIdentity,
+  SessionProvenance,
   SessionState,
   SessionView,
 } from "../src/domain/session.js"
@@ -30,13 +31,14 @@ import {
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
 
 const view = SessionView.make({
-  protocolVersion: 1,
+  protocolVersion: 2,
   sessionId: SessionIdentity.make(sessionId),
   projectIdentity: ProjectIdentity.make("fixture-project"),
   activity: "persisted Codex activity",
   evidenceSource: "codex-sqlite-thread-index",
   state: SessionState.cases.Discovered.make({}),
   freshness: "fresh",
+  provenance: SessionProvenance.cases.Observed.make({}),
   sourceUpdatedAtMs: 1_000,
   observedAtMs: 2_000,
   commitSequence: 1,
@@ -138,7 +140,7 @@ const snapshotBytes = (projectIdentity: string): Uint8Array =>
   Buffer.from(
     `${JSON.stringify(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [
           SessionView.make({
             ...view,
@@ -150,14 +152,36 @@ const snapshotBytes = (projectIdentity: string): Uint8Array =>
     "utf8",
   )
 
-const legacySnapshotBytes = (): Uint8Array =>
+const legacyViewV1 = {
+  protocolVersion: 1,
+  sessionId,
+  projectIdentity: "fixture-project",
+  activity: "persisted Codex activity",
+  evidenceSource: "codex-sqlite-thread-index",
+  state: { _tag: "Discovered" },
+  freshness: "fresh",
+  sourceUpdatedAtMs: 1_000,
+  observedAtMs: 2_000,
+  commitSequence: 1,
+} as const
+
+const legacySingletonSnapshotBytes = (): Uint8Array =>
   Buffer.from(
-    `${JSON.stringify(
-      SessionEvent.cases.SessionSnapshot.make({
-        protocolVersion: 1,
-        view,
-      }),
-    )}\n`,
+    `${JSON.stringify({
+      _tag: "SessionSnapshot",
+      protocolVersion: 1,
+      view: legacyViewV1,
+    })}\n`,
+    "utf8",
+  )
+
+const legacyOverviewSnapshotBytes = (): Uint8Array =>
+  Buffer.from(
+    `${JSON.stringify({
+      _tag: "SessionsSnapshot",
+      protocolVersion: 2,
+      views: [legacyViewV1],
+    })}\n`,
     "utf8",
   )
 
@@ -170,11 +194,11 @@ it.effect("encodes and decodes the public session event stream across local IPC"
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [view],
       }),
       SessionEvent.cases.SessionsUpdated.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [
           SessionView.make({
             ...view,
@@ -237,7 +261,7 @@ it.live("rejects malformed UTF-8 in a session event instead of replacing bytes",
   }),
 )
 
-it.live("rejects a legacy singleton event on the protocol-v2 client", () =>
+it.live("rejects a legacy singleton event on the protocol-v3 client", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
     yield* Effect.addFinalizer(() =>
@@ -245,7 +269,29 @@ it.live("rejects a legacy singleton event on the protocol-v2 client", () =>
     )
     const endpoint = makeEndpoint(directory)
 
-    yield* makeRawEventServer(endpoint, [legacySnapshotBytes()])
+    yield* makeRawEventServer(endpoint, [legacySingletonSnapshotBytes()])
+    const result = yield* receiveOneEvent(endpoint).pipe(Effect.result)
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "PackWalk.LocalIpcError",
+        code: "invalid-frame",
+        message: "PackWalk received an invalid session event",
+      })
+    }
+  }),
+)
+
+it.live("rejects a raw protocol-v2 overview event on the protocol-v3 client", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = makeEndpoint(directory)
+
+    yield* makeRawEventServer(endpoint, [legacyOverviewSnapshotBytes()])
     const result = yield* receiveOneEvent(endpoint).pipe(Effect.result)
 
     expect(Result.isFailure(result)).toBe(true)
@@ -280,7 +326,7 @@ it.live("preserves a UTF-8 code point split across IPC chunks", () =>
     expect(received).toHaveLength(1)
     expect(received[0]).toMatchObject({
       _tag: "SessionsSnapshot",
-      protocolVersion: 2,
+      protocolVersion: 3,
       views: [{ projectIdentity }],
     })
   }),
@@ -312,7 +358,7 @@ it.live("continues serving after a peer disconnects before subscribing", () =>
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [view],
       }),
     )
@@ -337,7 +383,7 @@ it.live("closes a malformed-command peer and continues serving", () =>
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [view],
       }),
     )
@@ -353,7 +399,7 @@ it.live("closes a malformed-command peer and continues serving", () =>
   }),
 )
 
-it.live("rejects a legacy subscription without emitting a v2 event", () =>
+it.live("rejects a protocol-v2 subscription without emitting a v3 event", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
     yield* Effect.addFinalizer(() =>
@@ -362,7 +408,7 @@ it.live("rejects a legacy subscription without emitting a v2 event", () =>
     const endpoint = makeEndpoint(directory)
     const events = Stream.make(
       SessionEvent.cases.SessionsSnapshot.make({
-        protocolVersion: 2,
+        protocolVersion: 3,
         views: [view],
       }),
     )
@@ -375,7 +421,7 @@ it.live("rejects a legacy subscription without emitting a v2 event", () =>
     })
 
     const closed = waitForSocketClose(peer)
-    peer.write('{"_tag":"SubscribeSession","protocolVersion":1}\n')
+    peer.write('{"_tag":"SubscribeSessions","protocolVersion":2}\n')
     yield* closed
 
     expect(receivedData).toBe(false)

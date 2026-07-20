@@ -23,6 +23,8 @@ import {
   Identity,
   ProjectIdentity,
   SessionIdentity,
+  SessionProvenance,
+  SessionRetentionReason,
   SessionState,
   SessionView,
 } from "../domain/session.js"
@@ -53,7 +55,7 @@ const CodexThreadRow = Schema.Struct({
 
 interface CodexThreadRow extends Schema.Schema.Type<typeof CodexThreadRow> {}
 
-const SessionRow = Schema.Struct({
+const Version2SessionRow = Schema.Struct({
   protocol_version: Schema.Literal(1),
   session_id: SessionIdentity,
   project_identity: ProjectIdentity,
@@ -66,11 +68,44 @@ const SessionRow = Schema.Struct({
   commit_sequence: PositiveSafeInteger,
 })
 
-interface SessionRow extends Schema.Schema.Type<typeof SessionRow> {}
+interface Version2SessionRow extends Schema.Schema.Type<typeof Version2SessionRow> {}
+
+const CurrentSessionRowFields = {
+  protocol_version: Schema.Literal(2),
+  session_id: SessionIdentity,
+  project_identity: ProjectIdentity,
+  activity: Schema.Literal("persisted Codex activity"),
+  evidence_source: Schema.Literal("codex-sqlite-thread-index"),
+  state_tag: Schema.Literals(["Discovered", "Polled"]),
+  source_updated_at_ms: DateTimestampMs,
+  observed_at_ms: DateTimestampMs,
+  commit_sequence: PositiveSafeInteger,
+} as const
+
+const ObservedSessionRow = Schema.Struct({
+  ...CurrentSessionRowFields,
+  freshness: Schema.Literal("fresh"),
+  provenance_tag: Schema.Literal("Observed"),
+  retention_reason: Schema.Null,
+})
+
+const RetainedSessionRow = Schema.Struct({
+  ...CurrentSessionRowFields,
+  freshness: Schema.Literal("stale"),
+  provenance_tag: Schema.Literal("Retained"),
+  retention_reason: SessionRetentionReason,
+})
+
+const SessionRow = Schema.Union([
+  ObservedSessionRow,
+  RetainedSessionRow,
+])
+
+type SessionRow = typeof SessionRow.Type
 
 const LegacySessionRow = Schema.Struct({
   singleton: Schema.Literal(1),
-  ...SessionRow.fields,
+  ...Version2SessionRow.fields,
 })
 
 interface LegacySessionRow extends Schema.Schema.Type<typeof LegacySessionRow> {}
@@ -82,7 +117,7 @@ const StorageStateRow = Schema.Struct({
 
 const TableNameRow = Schema.Struct({ name: Schema.NonEmptyString })
 const MigrationRow = Schema.Struct({
-  version: Schema.Literal(2),
+  version: PositiveSafeInteger,
   checksum: Schema.NonEmptyString,
 })
 
@@ -447,6 +482,142 @@ const migrateLegacySingletonSql = `
   DROP TABLE current_session;
 `
 
+const createCurrentSchemaV3Sql = `
+  CREATE TABLE current_sessions (
+    session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
+      length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    protocol_version INTEGER NOT NULL CHECK (protocol_version = 2),
+    project_identity TEXT NOT NULL CHECK (
+      length(CAST(project_identity AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
+    evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
+    state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
+    freshness TEXT NOT NULL CHECK (freshness IN ('fresh', 'stale')),
+    provenance_tag TEXT NOT NULL CHECK (
+      provenance_tag IN ('Observed', 'Retained')
+    ),
+    retention_reason TEXT CHECK (
+      retention_reason IS NULL OR
+      retention_reason IN ('source-unavailable', 'source-unsupported')
+    ),
+    source_updated_at_ms INTEGER NOT NULL CHECK (
+      source_updated_at_ms >= 0 AND
+      source_updated_at_ms <= 8640000000000000
+    ),
+    observed_at_ms INTEGER NOT NULL CHECK (
+      observed_at_ms >= 0 AND
+      observed_at_ms <= 8640000000000000
+    ),
+    commit_sequence INTEGER NOT NULL UNIQUE CHECK (
+      commit_sequence >= 1 AND commit_sequence <= 9007199254740991
+    ),
+    CHECK (
+      (
+        freshness = 'fresh' AND
+        provenance_tag = 'Observed' AND
+        retention_reason IS NULL
+      ) OR (
+        freshness = 'stale' AND
+        provenance_tag = 'Retained' AND
+        retention_reason IS NOT NULL
+      )
+    )
+  );
+
+  CREATE TABLE storage_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    last_commit_sequence INTEGER NOT NULL CHECK (
+      last_commit_sequence >= 0 AND
+      last_commit_sequence <= 9007199254740991
+    )
+  );
+
+  CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY,
+    checksum TEXT NOT NULL CHECK (length(checksum) > 0)
+  );
+`
+
+const migrateVersion2OverviewSql = `
+  ALTER TABLE current_sessions RENAME TO current_sessions_v2;
+
+  CREATE TABLE current_sessions (
+    session_id TEXT PRIMARY KEY COLLATE BINARY NOT NULL CHECK (
+      length(CAST(session_id AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    protocol_version INTEGER NOT NULL CHECK (protocol_version = 2),
+    project_identity TEXT NOT NULL CHECK (
+      length(CAST(project_identity AS BLOB)) BETWEEN 1 AND 4096
+    ),
+    activity TEXT NOT NULL CHECK (activity = 'persisted Codex activity'),
+    evidence_source TEXT NOT NULL CHECK (evidence_source = 'codex-sqlite-thread-index'),
+    state_tag TEXT NOT NULL CHECK (state_tag IN ('Discovered', 'Polled')),
+    freshness TEXT NOT NULL CHECK (freshness IN ('fresh', 'stale')),
+    provenance_tag TEXT NOT NULL CHECK (
+      provenance_tag IN ('Observed', 'Retained')
+    ),
+    retention_reason TEXT CHECK (
+      retention_reason IS NULL OR
+      retention_reason IN ('source-unavailable', 'source-unsupported')
+    ),
+    source_updated_at_ms INTEGER NOT NULL CHECK (
+      source_updated_at_ms >= 0 AND
+      source_updated_at_ms <= 8640000000000000
+    ),
+    observed_at_ms INTEGER NOT NULL CHECK (
+      observed_at_ms >= 0 AND
+      observed_at_ms <= 8640000000000000
+    ),
+    commit_sequence INTEGER NOT NULL UNIQUE CHECK (
+      commit_sequence >= 1 AND commit_sequence <= 9007199254740991
+    ),
+    CHECK (
+      (
+        freshness = 'fresh' AND
+        provenance_tag = 'Observed' AND
+        retention_reason IS NULL
+      ) OR (
+        freshness = 'stale' AND
+        provenance_tag = 'Retained' AND
+        retention_reason IS NOT NULL
+      )
+    )
+  );
+
+  INSERT INTO current_sessions (
+    session_id,
+    protocol_version,
+    project_identity,
+    activity,
+    evidence_source,
+    state_tag,
+    freshness,
+    provenance_tag,
+    retention_reason,
+    source_updated_at_ms,
+    observed_at_ms,
+    commit_sequence
+  )
+  SELECT
+    session_id,
+    2,
+    project_identity,
+    activity,
+    evidence_source,
+    state_tag,
+    freshness,
+    'Observed',
+    NULL,
+    source_updated_at_ms,
+    observed_at_ms,
+    commit_sequence
+  FROM current_sessions_v2;
+
+  DROP TABLE current_sessions_v2;
+`
+
 const currentMigration = {
   version: 2,
   checksum: createHash("sha256")
@@ -454,7 +625,17 @@ const currentMigration = {
     .digest("hex"),
 } as const
 
-const storageMigrations = [currentMigration] as const
+const retainedProjectionMigration = {
+  version: 3,
+  checksum: createHash("sha256")
+    .update(migrateVersion2OverviewSql)
+    .digest("hex"),
+} as const
+
+const storageMigrations = [
+  currentMigration,
+  retainedProjectionMigration,
+] as const
 
 const inspectStorageSchema = Effect.fn("SessionStorage.inspectSchema")(
   function* (database: DatabaseSync) {
@@ -515,22 +696,33 @@ const runSchemaTransaction = (
     catch: () => storageError("SessionStorage.open"),
   })
 
-const recordCurrentMigration = (database: DatabaseSync): void => {
+type StorageMigration = typeof storageMigrations[number]
+
+const recordMigration = (
+  database: DatabaseSync,
+  migration: StorageMigration,
+): void => {
   database
     .prepare("INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)")
-    .run(currentMigration.version, currentMigration.checksum)
+    .run(migration.version, migration.checksum)
+}
+
+const recordCurrentMigrations = (database: DatabaseSync): void => {
+  for (const migration of storageMigrations) {
+    recordMigration(database, migration)
+  }
 }
 
 const initializeFreshSchema = (database: DatabaseSync) =>
   runSchemaTransaction(database, () => {
-    database.exec(createCurrentSchemaSql)
+    database.exec(createCurrentSchemaV3Sql)
     database
       .prepare(`
         INSERT INTO storage_state (singleton, last_commit_sequence)
         VALUES (1, 0)
       `)
       .run()
-    recordCurrentMigration(database)
+    recordCurrentMigrations(database)
   })
 
 const migrateLegacySingleton = (
@@ -543,7 +735,7 @@ const migrateLegacySingleton = (
     )
     yield* runSchemaTransaction(database, () => {
       database.exec(migrateLegacySingletonSql)
-      recordCurrentMigration(database)
+      recordMigration(database, currentMigration)
     })
   })
 
@@ -583,7 +775,7 @@ const validateLegacySingleton = Effect.fn(
   return decoded
 })
 
-const verifyCurrentMigration = Effect.fn("SessionStorage.verifyMigration")(
+const inspectCurrentMigration = Effect.fn("SessionStorage.verifyMigration")(
   function* (database: DatabaseSync) {
     const rows = yield* Effect.try({
       try: () =>
@@ -597,15 +789,119 @@ const verifyCurrentMigration = Effect.fn("SessionStorage.verifyMigration")(
     })(rows).pipe(
       Effect.mapError(() => storageError("SessionStorage.open")),
     )
-    if (
-      decoded.length !== storageMigrations.length ||
-      decoded[0]?.version !== currentMigration.version ||
-      decoded[0].checksum !== currentMigration.checksum
-    ) {
+    if (decoded.length === 0 || decoded.length > storageMigrations.length) {
       return yield* storageError("SessionStorage.open")
     }
+
+    for (const [index, row] of decoded.entries()) {
+      const expected = storageMigrations[index]
+      if (
+        expected === undefined ||
+        row.version !== expected.version ||
+        row.checksum !== expected.checksum
+      ) {
+        return yield* storageError("SessionStorage.open")
+      }
+    }
+
+    return decoded.length === 1 ? 2 as const : 3 as const
   },
 )
+
+interface CurrentStorageSnapshot {
+  readonly rows: ReadonlyArray<SessionRow>
+  readonly lastCommitSequence: number
+}
+
+const upgradeVersion2Row = (row: Version2SessionRow): SessionRow => ({
+  protocol_version: 2,
+  session_id: row.session_id,
+  project_identity: row.project_identity,
+  activity: row.activity,
+  evidence_source: row.evidence_source,
+  state_tag: row.state_tag,
+  freshness: "fresh",
+  provenance_tag: "Observed",
+  retention_reason: null,
+  source_updated_at_ms: row.source_updated_at_ms,
+  observed_at_ms: row.observed_at_ms,
+  commit_sequence: row.commit_sequence,
+})
+
+const readCurrentStorageSnapshot = Effect.fn(
+  "SessionStorage.readCurrentSnapshot",
+)(function* (
+  database: DatabaseSync,
+  version: 2 | 3,
+) {
+  const stored = yield* Effect.try({
+    try: () => ({
+      rows: database
+        .prepare(`
+          SELECT *
+          FROM current_sessions
+          ORDER BY session_id COLLATE BINARY
+        `)
+        .all(),
+      state: database
+        .prepare(`
+          SELECT singleton, last_commit_sequence
+          FROM storage_state
+          WHERE singleton = 1
+        `)
+        .get(),
+    }),
+    catch: () => storageError("SessionStorage.open"),
+  })
+  const rows = version === 2
+    ? yield* Schema.decodeUnknownEffect(
+        Schema.Array(Version2SessionRow),
+        { onExcessProperty: "error" },
+      )(stored.rows).pipe(
+        Effect.mapError(() => storageError("SessionStorage.open")),
+        Effect.map((decoded) => decoded.map(upgradeVersion2Row)),
+      )
+    : yield* Schema.decodeUnknownEffect(
+        Schema.Array(SessionRow),
+        { onExcessProperty: "error" },
+      )(stored.rows).pipe(
+        Effect.mapError(() => storageError("SessionStorage.open")),
+      )
+  const state = yield* Schema.decodeUnknownEffect(StorageStateRow, {
+    onExcessProperty: "error",
+  })(stored.state).pipe(
+    Effect.mapError(() => storageError("SessionStorage.open")),
+  )
+  if (
+    rows.some(
+      (row) => row.commit_sequence > state.last_commit_sequence,
+    )
+  ) {
+    return yield* storageError("SessionStorage.open")
+  }
+  return {
+    rows,
+    lastCommitSequence: state.last_commit_sequence,
+  } satisfies CurrentStorageSnapshot
+})
+
+const migrateVersion2Overview = (
+  database: DatabaseSync,
+  path: string,
+  backupVersion2: boolean = true,
+) =>
+  Effect.gen(function* () {
+    yield* readCurrentStorageSnapshot(database, 2)
+    if (backupVersion2) {
+      yield* completeSqliteBackup(() =>
+        backup(database, `${path}.pre-migration-v3.sqlite`),
+      )
+    }
+    yield* runSchemaTransaction(database, () => {
+      database.exec(migrateVersion2OverviewSql)
+      recordMigration(database, retainedProjectionMigration)
+    })
+  })
 
 const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
   function* (
@@ -620,9 +916,13 @@ const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
     if (schema === "legacy-singleton") {
       yield* validateLegacySingleton(database)
       yield* migrateLegacySingleton(database, path)
+      yield* migrateVersion2Overview(database, path, false)
       return
     }
-    yield* verifyCurrentMigration(database)
+    const version = yield* inspectCurrentMigration(database)
+    if (version === 2) {
+      yield* migrateVersion2Overview(database, path)
+    }
   },
 )
 
@@ -631,19 +931,6 @@ interface ImportedStorageSnapshot {
   readonly rows: ReadonlyArray<SessionRow>
   readonly lastCommitSequence: number
 }
-
-const legacySessionRow = (row: LegacySessionRow): SessionRow => ({
-  protocol_version: row.protocol_version,
-  session_id: row.session_id,
-  project_identity: row.project_identity,
-  activity: row.activity,
-  evidence_source: row.evidence_source,
-  state_tag: row.state_tag,
-  freshness: row.freshness,
-  source_updated_at_ms: row.source_updated_at_ms,
-  observed_at_ms: row.observed_at_ms,
-  commit_sequence: row.commit_sequence,
-})
 
 const readImportSnapshot = (path: string) =>
   Effect.acquireUseRelease(
@@ -660,7 +947,7 @@ const readImportSnapshot = (path: string) =>
         }
         if (schema === "legacy-singleton") {
           const legacyRows = yield* validateLegacySingleton(database)
-          const rows = legacyRows.map(legacySessionRow)
+          const rows = legacyRows.map(upgradeVersion2Row)
           return {
             schema,
             rows,
@@ -668,48 +955,12 @@ const readImportSnapshot = (path: string) =>
           } satisfies ImportedStorageSnapshot
         }
 
-        yield* verifyCurrentMigration(database)
-        const stored = yield* Effect.try({
-          try: () => ({
-            rows: database
-              .prepare(`
-                SELECT *
-                FROM current_sessions
-                ORDER BY session_id COLLATE BINARY
-              `)
-              .all(),
-            state: database
-              .prepare(`
-                SELECT singleton, last_commit_sequence
-                FROM storage_state
-                WHERE singleton = 1
-              `)
-              .get(),
-          }),
-          catch: () => storageError("SessionStorage.open"),
-        })
-        const rows = yield* Schema.decodeUnknownEffect(
-          Schema.Array(SessionRow),
-          { onExcessProperty: "error" },
-        )(stored.rows).pipe(
-          Effect.mapError(() => storageError("SessionStorage.open")),
-        )
-        const state = yield* Schema.decodeUnknownEffect(StorageStateRow, {
-          onExcessProperty: "error",
-        })(stored.state).pipe(
-          Effect.mapError(() => storageError("SessionStorage.open")),
-        )
-        if (
-          rows.some(
-            (row) => row.commit_sequence > state.last_commit_sequence,
-          )
-        ) {
-          return yield* storageError("SessionStorage.open")
-        }
+        const version = yield* inspectCurrentMigration(database)
+        const stored = yield* readCurrentStorageSnapshot(database, version)
         return {
           schema,
-          rows,
-          lastCommitSequence: state.last_commit_sequence,
+          rows: stored.rows,
+          lastCommitSequence: stored.lastCommitSequence,
         } satisfies ImportedStorageSnapshot
       }),
     (database) => Effect.sync(() => database.close()),
@@ -720,7 +971,7 @@ const initializeFreshSchemaFromSnapshot = (
   snapshot: ImportedStorageSnapshot,
 ) =>
   runSchemaTransaction(database, () => {
-    database.exec(createCurrentSchemaSql)
+    database.exec(createCurrentSchemaV3Sql)
     const insert = database.prepare(`
       INSERT INTO current_sessions (
         protocol_version,
@@ -730,10 +981,12 @@ const initializeFreshSchemaFromSnapshot = (
         evidence_source,
         state_tag,
         freshness,
+        provenance_tag,
+        retention_reason,
         source_updated_at_ms,
         observed_at_ms,
         commit_sequence
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     for (const row of snapshot.rows) {
       insert.run(
@@ -744,6 +997,8 @@ const initializeFreshSchemaFromSnapshot = (
         row.evidence_source,
         row.state_tag,
         row.freshness,
+        row.provenance_tag,
+        row.retention_reason,
         row.source_updated_at_ms,
         row.observed_at_ms,
         row.commit_sequence,
@@ -755,7 +1010,7 @@ const initializeFreshSchemaFromSnapshot = (
         VALUES (1, ?)
       `)
       .run(snapshot.lastCommitSequence)
-    recordCurrentMigration(database)
+    recordCurrentMigrations(database)
   })
 
 const importLegacySnapshotIntoOwnedDatabase = (
@@ -943,6 +1198,12 @@ const decodeRow = (row: unknown) =>
             ? SessionState.cases.Discovered.make({})
             : SessionState.cases.Polled.make({}),
         freshness: decoded.freshness,
+        provenance:
+          decoded.provenance_tag === "Observed"
+            ? SessionProvenance.cases.Observed.make({})
+            : SessionProvenance.cases.Retained.make({
+                reason: decoded.retention_reason,
+              }),
         sourceUpdatedAtMs: decoded.source_updated_at_ms,
         observedAtMs: decoded.observed_at_ms,
         commitSequence: decoded.commit_sequence,
@@ -1083,10 +1344,12 @@ export const layer = (path: string, legacyPath?: string) =>
                     evidence_source,
                     state_tag,
                     freshness,
+                    provenance_tag,
+                    retention_reason,
                     source_updated_at_ms,
                     observed_at_ms,
                     commit_sequence
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(session_id) DO UPDATE SET
                     protocol_version = excluded.protocol_version,
                     project_identity = excluded.project_identity,
@@ -1094,6 +1357,8 @@ export const layer = (path: string, legacyPath?: string) =>
                     evidence_source = excluded.evidence_source,
                     state_tag = excluded.state_tag,
                     freshness = excluded.freshness,
+                    provenance_tag = excluded.provenance_tag,
+                    retention_reason = excluded.retention_reason,
                     source_updated_at_ms = excluded.source_updated_at_ms,
                     observed_at_ms = excluded.observed_at_ms,
                     commit_sequence = excluded.commit_sequence
@@ -1107,6 +1372,10 @@ export const layer = (path: string, legacyPath?: string) =>
                     view.evidenceSource,
                     view.state._tag,
                     view.freshness,
+                    view.provenance._tag,
+                    view.provenance._tag === "Retained"
+                      ? view.provenance.reason
+                      : null,
                     view.sourceUpdatedAtMs,
                     view.observedAtMs,
                     view.commitSequence,
