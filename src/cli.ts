@@ -10,6 +10,7 @@ import {
   prepareRuntimeDirectories,
   RuntimePaths,
   runtimePathsLayer,
+  verifyRuntimeAuthority,
 } from "./adapters/runtime-paths.js"
 import { connectOrStart } from "./application/cli-startup.js"
 import {
@@ -32,6 +33,7 @@ const cliProgram = Effect.scoped(
     const command = yield* parseCliCommand(yield* stdio.args)
     const paths = yield* RuntimePaths
     yield* prepareRuntimeDirectories
+    yield* verifyRuntimeAuthority(paths)
     const events = yield* connectOrStart({
       connect: connectSessionEvents(paths.ipcEndpoint),
       startDaemon: startPackWalkDaemon,

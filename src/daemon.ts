@@ -5,6 +5,7 @@ import {
   prepareRuntimeDirectories,
   RuntimePaths,
   runtimePathsLayer,
+  verifyRuntimeAuthority,
 } from "./adapters/runtime-paths.js"
 import {
   codexSourceLayer,
@@ -21,8 +22,10 @@ const daemonProgram = Effect.scoped(
   Effect.gen(function* () {
     const paths = yield* RuntimePaths
     yield* prepareRuntimeDirectories
+    yield* verifyRuntimeAuthority(paths)
 
     const endpointClaim = yield* claimSessionDaemonEndpoint(paths.ipcEndpoint)
+    yield* verifyRuntimeAuthority(paths)
     if (endpointClaim._tag === "AlreadyRunning") {
       return
     }
@@ -42,6 +45,7 @@ const daemonProgram = Effect.scoped(
       ),
     )
     const daemon = Context.get(daemonContext, SessionDaemon)
+    yield* verifyRuntimeAuthority(paths)
     return yield* daemon.lifetime
   }),
 )

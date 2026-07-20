@@ -4,15 +4,16 @@ import {
   constants as fileSystemConstants,
   fchmodSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   realpathSync,
+  statSync,
 } from "node:fs"
 import { homedir } from "node:os"
 import {
   basename,
   dirname,
-  join as nativeJoin,
   posix,
   win32,
 } from "node:path"
@@ -40,70 +41,211 @@ export interface RuntimePathsValue {
   readonly packWalkDataDirectory: string
   readonly legacyPackWalkDatabasePath: string
   readonly packWalkDatabasePath: string
+  readonly packWalkDatabaseAuthority: DurableDatabaseAuthority
   readonly ipcDirectory?: string
   readonly ipcEndpoint: string
+}
+
+export interface DurableDatabaseAuthority {
+  readonly deviceId: bigint
+  readonly fileId: bigint
+  readonly databaseName: string
+  readonly targetKind: "directory"
 }
 
 // Incompatible command/event protocols use distinct endpoints so a newly
 // installed client cannot silently connect to a persistent older daemon.
 const sessionIpcNamespace = "v2"
 
-export type DurablePathCanonicalizer = (path: string) => string
+export type DurablePathIdentifier = (
+  path: string,
+) => DurableDatabaseAuthority
 
 const nodeErrorCode = (error: unknown): string | undefined =>
   typeof error === "object" && error !== null && "code" in error
     ? String(error.code)
     : undefined
 
-/**
- * Resolves the physical identity of an existing path, or resolves its nearest
- * existing ancestor before restoring the missing suffix. This keeps endpoint
- * authority stable while SQLite creates a database beneath an aliased data
- * directory.
- */
-export const canonicalizeNativeDurablePath: DurablePathCanonicalizer = (
-  path,
-) => {
-  const missingSegments: Array<string> = []
-  let candidate = path
+const normalizeDatabaseName = (
+  databaseName: string,
+  platform: RuntimePathInputs["platform"],
+): string =>
+  platform === "win32"
+    ? win32.normalize(databaseName).toLowerCase()
+    : posix.normalize(databaseName)
 
-  while (true) {
-    try {
-      return nativeJoin(realpathSync.native(candidate), ...missingSegments)
-    } catch (error) {
-      if (nodeErrorCode(error) !== "ENOENT") {
-        throw error
-      }
-
-      const parent = dirname(candidate)
-      if (parent === candidate) {
-        throw error
-      }
-
-      missingSegments.unshift(basename(candidate))
-      candidate = parent
-    }
+const requireUsableDirectoryAuthority = (
+  authority: Pick<DurableDatabaseAuthority, "deviceId" | "fileId">,
+): void => {
+  if (authority.deviceId <= 0n || authority.fileId <= 0n) {
+    throw new Error("Native directory identity is unavailable")
   }
 }
 
-const durableDatabaseToken = (
-  path: string,
+const normalizeDurableDatabaseAuthority = (
+  authority: DurableDatabaseAuthority,
   platform: RuntimePathInputs["platform"],
-): string => {
-  const normalized =
-    platform === "win32"
-      ? win32.normalize(path).toLowerCase()
-      : posix.normalize(path)
+): DurableDatabaseAuthority => {
+  requireUsableDirectoryAuthority(authority)
+  return {
+    ...authority,
+    databaseName: normalizeDatabaseName(authority.databaseName, platform),
+  }
+}
 
-  return createHash("sha256")
-    .update(normalized)
+const captureNativeDirectoryAuthority = (
+  directory: string,
+  databaseName: string,
+): DurableDatabaseAuthority => {
+  const normalizedDatabaseName = normalizeDatabaseName(
+    databaseName,
+    process.platform === "win32" ? "win32" : "linux",
+  )
+
+  if (process.platform === "win32") {
+    const identity = statSync(directory, { bigint: true })
+    if (!identity.isDirectory()) {
+      throw new Error("Durable database authority is not a directory")
+    }
+    const authority = {
+      deviceId: identity.dev,
+      fileId: identity.ino,
+      databaseName: normalizedDatabaseName,
+      targetKind: "directory" as const,
+    }
+    requireUsableDirectoryAuthority(authority)
+    return authority
+  }
+
+  const descriptor = openSync(
+    realpathSync.native(directory),
+    fileSystemConstants.O_RDONLY |
+      fileSystemConstants.O_DIRECTORY |
+      fileSystemConstants.O_NOFOLLOW,
+  )
+
+  try {
+    const identity = fstatSync(descriptor, { bigint: true })
+    if (!identity.isDirectory()) {
+      throw new Error("Durable database authority is not a directory")
+    }
+    if (
+      process.getuid === undefined ||
+      identity.uid !== BigInt(process.getuid()) ||
+      (identity.mode & 0o777n) !== 0o700n
+    ) {
+      throw new Error("Durable database authority is not private")
+    }
+    const authority = {
+      deviceId: identity.dev,
+      fileId: identity.ino,
+      databaseName: normalizedDatabaseName,
+      targetKind: "directory" as const,
+    }
+    requireUsableDirectoryAuthority(authority)
+    return authority
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+const secureNativePackWalkDataDirectory = (directory: string): void => {
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  if (process.platform === "win32") return
+  if (process.getuid === undefined) {
+    throw new Error("Unix user identity is unavailable")
+  }
+
+  const descriptor = openSync(
+    realpathSync.native(directory),
+    fileSystemConstants.O_RDONLY |
+      fileSystemConstants.O_DIRECTORY |
+      fileSystemConstants.O_NOFOLLOW,
+  )
+
+  try {
+    const opened = fstatSync(descriptor)
+    if (!opened.isDirectory() || opened.uid !== process.getuid()) {
+      throw new Error("Unsafe PackWalk data directory")
+    }
+
+    if ((opened.mode & 0o777) !== 0o700) {
+      fchmodSync(descriptor, 0o700)
+    }
+
+    const secured = fstatSync(descriptor)
+    if (
+      !secured.isDirectory() ||
+      secured.uid !== process.getuid() ||
+      (secured.mode & 0o777) !== 0o700
+    ) {
+      throw new Error("Unsafe PackWalk data directory")
+    }
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+const captureNativeDurablePath: DurablePathIdentifier = (path) => {
+  let existingEntry: ReturnType<typeof lstatSync> | undefined
+  try {
+    existingEntry = lstatSync(path)
+  } catch (error) {
+    if (nodeErrorCode(error) !== "ENOENT") throw error
+  }
+
+  if (existingEntry?.isSymbolicLink() === true) {
+    if (process.platform === "win32") {
+      throw new Error(
+        "Final database symlink authority is unsupported on Windows",
+      )
+    }
+    const resolvedDatabasePath = realpathSync.native(path)
+    return captureNativeDirectoryAuthority(
+      dirname(resolvedDatabasePath),
+      basename(resolvedDatabasePath),
+    )
+  }
+
+  return captureNativeDirectoryAuthority(
+    dirname(path),
+    basename(path),
+  )
+}
+
+/**
+ * Prepares and identifies the directory that owns the replaceable SQLite
+ * file. Native directory file identity converges symlinks, firmlinks,
+ * junctions, and bind mounts without relying on a lexical realpath string. An
+ * existing final database symlink uses its private target parent and basename;
+ * a dangling or unqualified final symlink fails instead of falling back to its
+ * spelling.
+ */
+export const identifyNativeDurablePath: DurablePathIdentifier = (path) => {
+  secureNativePackWalkDataDirectory(dirname(path))
+  return captureNativeDurablePath(path)
+}
+
+const durableDatabaseToken = (
+  authority: DurableDatabaseAuthority,
+  platform: RuntimePathInputs["platform"],
+): string =>
+  createHash("sha256")
+    .update(
+      [
+        sessionIpcNamespace,
+        authority.targetKind,
+        authority.deviceId.toString(16),
+        authority.fileId.toString(16),
+        normalizeDatabaseName(authority.databaseName, platform),
+      ].join("\0"),
+    )
     .digest("hex")
     .slice(0, 24)
-}
 
 export const deriveRuntimePaths = (
   input: RuntimePathInputs,
-  canonicalizeDurablePath: DurablePathCanonicalizer = (path) => path,
+  identifyDurablePath: DurablePathIdentifier,
 ): RuntimePathsValue => {
   const path = input.platform === "win32" ? win32 : posix
 
@@ -133,8 +275,12 @@ export const deriveRuntimePaths = (
       packWalkDataDirectory,
       "packwalk-v2.sqlite",
     )
+    const packWalkDatabaseAuthority = normalizeDurableDatabaseAuthority(
+      identifyDurablePath(packWalkDatabasePath),
+      input.platform,
+    )
     const databaseToken = durableDatabaseToken(
-      canonicalizeDurablePath(packWalkDatabasePath),
+      packWalkDatabaseAuthority,
       input.platform,
     )
     return {
@@ -145,6 +291,7 @@ export const deriveRuntimePaths = (
         "packwalk.sqlite",
       ),
       packWalkDatabasePath,
+      packWalkDatabaseAuthority,
       ipcEndpoint: `\\\\.\\pipe\\packwalk-${sessionIpcNamespace}-${databaseToken}`,
     }
   }
@@ -162,8 +309,12 @@ export const deriveRuntimePaths = (
     packWalkDataDirectory,
     "packwalk-v2.sqlite",
   )
+  const packWalkDatabaseAuthority = normalizeDurableDatabaseAuthority(
+    identifyDurablePath(packWalkDatabasePath),
+    input.platform,
+  )
   const databaseToken = durableDatabaseToken(
-    canonicalizeDurablePath(packWalkDatabasePath),
+    packWalkDatabaseAuthority,
     input.platform,
   )
   const ipcDirectory = posix.join(
@@ -179,6 +330,7 @@ export const deriveRuntimePaths = (
       "packwalk.sqlite",
     ),
     packWalkDatabasePath,
+    packWalkDatabaseAuthority,
     ipcDirectory,
     ipcEndpoint: posix.join(
       ipcDirectory,
@@ -191,6 +343,39 @@ export class RuntimePathError extends Schema.TaggedErrorClass<RuntimePathError>(
   "PackWalk.RuntimePathError",
   { message: Schema.String },
 ) {}
+
+const sameDurableDatabaseAuthority = (
+  left: DurableDatabaseAuthority,
+  right: DurableDatabaseAuthority,
+): boolean =>
+  left.deviceId === right.deviceId &&
+  left.fileId === right.fileId &&
+  left.databaseName === right.databaseName &&
+  left.targetKind === right.targetKind
+
+export const verifyRuntimeAuthority = (
+  paths: RuntimePathsValue,
+  captureDurablePath: DurablePathIdentifier = captureNativeDurablePath,
+) =>
+  Effect.try({
+    try: () => {
+      const actualAuthority = captureDurablePath(
+        paths.packWalkDatabasePath,
+      )
+      if (
+        !sameDurableDatabaseAuthority(
+          paths.packWalkDatabaseAuthority,
+          actualAuthority,
+        )
+      ) {
+        throw new Error("PackWalk database authority changed")
+      }
+    },
+    catch: () =>
+      new RuntimePathError({
+        message: "PackWalk database authority changed",
+      }),
+  })
 
 export class RuntimePaths extends Context.Service<
   RuntimePaths,
@@ -231,7 +416,7 @@ const resolveRuntimePaths = Effect.gen(function* () {
               ? { xdgDataHome: xdgDataHome.value }
               : {}),
           },
-          canonicalizeNativeDurablePath,
+          identifyNativeDurablePath,
         ),
       )
     },

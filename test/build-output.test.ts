@@ -16,8 +16,8 @@ import { fileURLToPath } from "node:url"
 import { expect, it } from "vitest"
 
 import {
-  canonicalizeNativeDurablePath,
   deriveRuntimePaths,
+  identifyNativeDurablePath,
 } from "../src/adapters/runtime-paths.js"
 import {
   runBoundedCommand,
@@ -112,7 +112,7 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
       localAppData,
       xdgDataHome: dataDirectory,
     },
-    canonicalizeNativeDurablePath,
+    identifyNativeDurablePath,
   )
   if (runtimePaths.ipcDirectory !== undefined) {
     mkdirSync(dirname(runtimePaths.ipcEndpoint), { recursive: true })

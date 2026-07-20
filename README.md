@@ -97,14 +97,18 @@ npm run --silent packwalk -- json
 emits the daemon's versioned Effect-Schema event: an available result is a
 protocol-v2 `SessionsSnapshot` with a required nonempty `views` collection,
 while an unavailable source is a `SessionUnavailable` with a required redacted
-`code` and `message`. Committed polling events are `SessionsUpdated` values
-that carry the complete overview plus exact `changedSessionIds`. The tagged
-variants make unavailable session fields distinct from data that was merely
-omitted. Both commands query the daemon, write one document with the host
-platform's line ending, and exit. A snapshot or explicit unavailable result
-exits successfully; invalid arguments, connection or daemon failure, an empty
-stream, encoding failure, or output failure emits one redacted error to stderr
-and exits nonzero. Neither command reads Codex or PackWalk SQLite directly.
+`code` and `message`. Committed polling normally emits `SessionsUpdated` with
+the complete overview plus exact `changedSessionIds`. If that richer envelope
+would exceed the bounded local frame while the equivalent complete overview
+fits, the daemon commits and emits `SessionsSnapshot` instead. Consumers must
+treat both tags as complete current overviews; only `SessionsUpdated` names the
+changed identities. The tagged variants make unavailable session fields
+distinct from data that was merely omitted. Both commands query the daemon,
+write one document with the host platform's line ending, and exit. A snapshot
+or explicit unavailable result exits successfully; invalid arguments,
+connection or daemon failure, an empty stream, encoding failure, or output
+failure emits one redacted error to stderr and exits nonzero. Neither command
+reads Codex or PackWalk SQLite directly.
 
 Protocol-v2 overview clients use a versioned per-user local endpoint. A
 persistent protocol-v1 daemon is neither killed nor mistaken for the current

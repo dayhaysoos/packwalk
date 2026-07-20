@@ -208,13 +208,17 @@ claimed.
 [Ticket 04](../.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
 is implemented on `agent/ticket-04-overlapping-sessions` from fixed integration
 point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` and remains claimed while its
-review gates run. The daemon now publishes protocol-v2 complete overviews with
-exact `changedSessionIds`; the CLI presents every supported session distinctly,
-including two exact IDs in one repository with the same display label. Polling
-commits use one daemon-owned global allocator and upsert only changed exact-ID
-rows, so an update to one session leaves every other projection byte-for-byte
-unchanged. Duplicate exact source IDs fail visibly as a redacted
-`source-ambiguous` result before project resolution or arbitrary selection.
+review gates run. The daemon now publishes protocol-v2 complete overviews. A
+committed poll normally uses `SessionsUpdated` with exact `changedSessionIds`;
+when only that richer envelope exceeds the bounded frame, the equivalent
+complete `SessionsSnapshot` is the committed fallback. Both tags are complete
+current overviews, while only the update names changed identities. The CLI
+presents every supported session distinctly, including two exact IDs in one
+repository with the same display label. Polling commits use one daemon-owned
+global allocator and upsert only changed exact-ID rows, so an update to one
+session leaves every other projection byte-for-byte unchanged. Duplicate exact
+source IDs fail visibly as a redacted `source-ambiguous` result before project
+resolution or arbitrary selection.
 
 The expanded SQLite schema migrates the v1 singleton transactionally after a
 SQLite-aware backup, validates legacy rows with Effect Schema before migration,
@@ -303,8 +307,30 @@ reconnects to the committed polled snapshot. Focused verification passes 13
 tests; `npm run verify` passes 21 files and 100 tests plus typecheck, lint, and
 build; and the opt-in persisted-Codex check passes in 8.20 seconds. A
 supplemental fallback audit reports zero actionable findings. Ticket 04 remains
-claimed for another wholly fresh generic review; product preflight stays paused
-until that review is clean.
+claimed after fresh generic review pass 5 reported two actionable findings.
+First, native macOS firmlink spellings for the same database device/inode can
+still hash to different IPC endpoints and split sole-writer daemon authority.
+Second, the README and opening current-state contract imply every committed
+poll is `SessionsUpdated`, omitting the intentional bounded
+`SessionsSnapshot` fallback. That P2 gap is now repaired: both public contracts
+name the two valid complete-overview variants and reserve
+`changedSessionIds` for `SessionsUpdated`. The native-alias P1 is now repaired,
+including two follow-up defects found by its final targeted audit: revalidation
+uses a separate capture-only path that
+does not recreate or chmod a missing directory, and existing final database
+symlinks require a current-user-owned mode-0700 target parent. Shared and
+dangling targets fail without mutation; Windows final-file symlinks fail closed
+pending Ticket 10 qualification. Authority is revalidated after prep, after
+endpoint claim before either `AlreadyRunning` or migration, and after
+session/storage acquisition. Both real macOS spellings now derive
+`/tmp/packwalk-v2-35ce8d997aaefb5435f8bb4f/daemon-v2.sock`. Focused checks pass
+25 tests; `npm run verify` passes 21 files and 108 tests plus typecheck, lint,
+and build; and the persisted-Codex check passes in 4.12 seconds. Compiled JSON
+and text each returned all 19 unique exact identities with zero exits and empty
+stderr. The endpoint-owning v2 PID 27668 was stopped and the pre-existing v1
+PID 77857 remains untouched. Final targeted authority review reports zero
+actionable findings. Ticket 04 remains claimed for another wholly fresh generic
+review; product preflight remains paused until that review is clean.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 

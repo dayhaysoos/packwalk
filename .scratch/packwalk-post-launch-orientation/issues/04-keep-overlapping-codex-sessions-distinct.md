@@ -168,3 +168,52 @@ sessions overlap, share a repository, or have duplicate display labels.
   reports zero actionable findings. Ticket 04 remains claimed for a wholly
   fresh generic review and independent product preflight; no maintainer
   acceptance is claimed.
+- 2026-07-20: Fresh generic review pass 5 reports one P1 Standards blocker
+  and one P2 public-contract documentation gap. On this macOS host, the
+  `/Users/.../packwalk-v2.sqlite` and
+  `/System/Volumes/Data/Users/.../packwalk-v2.sqlite` spellings resolve to the
+  same device/inode but still derive different IPC endpoints, so firmlink or
+  bind-mount aliases can split sole-writer daemon authority. Separately, the
+  README and opening current-state contract imply every committed poll is
+  `SessionsUpdated`, omitting the intentional bounded `SessionsSnapshot`
+  fallback. Ticket 04 remains claimed while native filesystem authority gets a
+  red alias regression and stable identity anchor, and both public contracts
+  document the two valid committed-poll variants. Full verification and an
+  entirely fresh generic review follow; product preflight remains paused.
+- 2026-07-20: Pass 5's P2 contract gap is repaired in the README and opening
+  current-state handoff. Both now state that committed polling normally emits a
+  complete `SessionsUpdated` with exact `changedSessionIds`, while an oversized
+  update envelope may use the equivalent bounded complete `SessionsSnapshot`;
+  consumers treat both as current overviews. The native filesystem-authority
+  P1 remains the active blocker. No review gate has been waived.
+- 2026-07-20: The native alias implementation now makes both real macOS
+  spellings converge and passes 107 deterministic tests plus the persisted
+  source check, but its final targeted audit found two P1s before checkpoint.
+  Revalidation currently calls the preparing resolver, so a missing/swapped
+  data directory is recreated and chmodded before comparison instead of
+  failing read-only. Also, a final database symlink may anchor an external
+  shared target parent without verifying current ownership and private mode,
+  allowing target-file replacement to evade the parent-identity checks. Ticket
+  04 remains claimed while red regressions split prepare from capture and
+  reject non-private symlink target parents. Fresh full verification and a
+  wholly new generic review remain required; product preflight stays paused.
+- 2026-07-20: Both targeted authority P1s are repaired with red-first
+  regressions. Initial resolution creates and secures the exact PackWalk data
+  directory, then derives one v2 endpoint from its raw BigInt device/file
+  identity plus the normalized database basename. Revalidation uses a separate
+  capture-only path and leaves a missing directory absent on failure. Existing
+  final database symlinks require a current-user-owned mode-0700 target parent;
+  shared and dangling targets fail without chmod, and Windows final-file
+  symlinks fail closed pending native qualification. CLI verifies after prep;
+  the daemon verifies before claim, immediately after claim before either the
+  `AlreadyRunning` return or migration, and after session/storage acquisition.
+  The two real macOS spellings now derive the same
+  `/tmp/packwalk-v2-35ce8d997aaefb5435f8bb4f/daemon-v2.sock`. Focused checks
+  pass 25 tests; `npm run verify` passes 21 files and 108 tests plus typecheck,
+  lint, and build; and the persisted-Codex check passes in 4.12 seconds. The
+  compiled JSON/text path returns all 19 unique exact identities with zero
+  exits and empty stderr. Its endpoint-owning v2 PID 27668 was stopped; the
+  pre-existing v1 PID 77857 remains untouched. Final targeted authority review
+  reports zero actionable findings. Ticket 04 remains claimed for a wholly
+  fresh generic review and independent product preflight; no maintainer
+  acceptance is claimed.
