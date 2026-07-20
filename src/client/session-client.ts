@@ -50,15 +50,19 @@ const projectName = (identity: string): string => {
 const utcTimestamp = (epochMs: number): string =>
   new Date(epochMs).toISOString()
 
+interface SessionFrameFields {
+  readonly project: string
+  readonly state: string
+  readonly activity: string
+  readonly session: string
+  readonly evidence: string
+  readonly freshness: string
+  readonly sourceUpdated: string
+  readonly observed: string
+}
+
 const formatDetails = (
-  project: string,
-  state: string,
-  activity: string,
-  session: string,
-  evidence: string,
-  freshness: string,
-  sourceUpdated: string,
-  observed: string,
+  fields: SessionFrameFields,
 ): ReadonlyArray<string> => [
   formatColumns([
     ["PROJECT", projectWidth],
@@ -66,9 +70,9 @@ const formatDetails = (
     ["ACTIVITY"],
   ]),
   formatColumns([
-    [project, projectWidth],
-    [state, stateWidth],
-    [activity],
+    [fields.project, projectWidth],
+    [fields.state, stateWidth],
+    [fields.activity],
   ]),
   formatColumns([
     ["SESSION", sessionWidth],
@@ -76,47 +80,47 @@ const formatDetails = (
     ["FRESHNESS"],
   ]),
   formatColumns([
-    [session, sessionWidth],
-    [evidence, evidenceWidth],
-    [freshness],
+    [fields.session, sessionWidth],
+    [fields.evidence, evidenceWidth],
+    [fields.freshness],
   ]),
   formatColumns([
     ["SOURCE UPDATED", sourceUpdatedWidth],
     ["OBSERVED"],
   ]),
   formatColumns([
-    [sourceUpdated, sourceUpdatedWidth],
-    [observed],
+    [fields.sourceUpdated, sourceUpdatedWidth],
+    [fields.observed],
   ]),
 ]
 
 export const formatSessionView = (view: SessionView): ReadonlyArray<string> =>
-  formatDetails(
-    escapeTerminalText(projectName(view.projectIdentity)),
-    view.state._tag.toUpperCase(),
-    view.activity,
-    escapeTerminalText(view.sessionId),
-    view.evidenceSource,
-    view.freshness,
-    utcTimestamp(view.sourceUpdatedAtMs),
-    utcTimestamp(view.observedAtMs),
-  )
+  formatDetails({
+    project: escapeTerminalText(projectName(view.projectIdentity)),
+    state: view.state._tag.toUpperCase(),
+    activity: view.activity,
+    session: escapeTerminalText(view.sessionId),
+    evidence: view.evidenceSource,
+    freshness: view.freshness,
+    sourceUpdated: utcTimestamp(view.sourceUpdatedAtMs),
+    observed: utcTimestamp(view.observedAtMs),
+  })
 
 const formatEvent = (event: SessionEvent): ReadonlyArray<string> => {
   if (event._tag !== "SessionUnavailable") {
     return formatSessionView(event.view)
   }
 
-  return formatDetails(
-    "-",
-    "UNAVAILABLE",
-    "details unavailable",
-    "-",
-    "-",
-    "-",
-    "-",
-    "-",
-  )
+  return formatDetails({
+    project: "-",
+    state: "UNAVAILABLE",
+    activity: "details unavailable",
+    session: "-",
+    evidence: "-",
+    freshness: "-",
+    sourceUpdated: "-",
+    observed: "-",
+  })
 }
 
 export const runSessionClient = <E, R>(

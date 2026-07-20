@@ -17,12 +17,13 @@ import { Service as SessionStorage } from "./session-storage.js"
 import {
   matchTransition,
   SessionEvent,
+  SessionTransitionTrigger,
   transitionSession,
 } from "../domain/session.js"
 
 export interface Interface {
   readonly events: Stream.Stream<SessionEvent>
-  readonly refresh: Effect.Effect<void>
+  readonly refresh: () => Effect.Effect<void>
   readonly runPolling: Effect.Effect<never, import("../domain/session.js").IllegalSessionTransition>
 }
 
@@ -34,6 +35,22 @@ interface SessionEventEnvelope {
   readonly revision: number
   readonly event: SessionEvent
 }
+
+const sourceUnavailableEvent = (
+  code: "source-incompatible" | "source-unavailable",
+): SessionEvent =>
+  SessionEvent.cases.SessionUnavailable.make({
+    protocolVersion: 1,
+    code,
+    message: "PackWalk could not read supported Codex persisted evidence",
+  })
+
+const storageUnavailableEvent = (): SessionEvent =>
+  SessionEvent.cases.SessionUnavailable.make({
+    protocolVersion: 1,
+    code: "storage-unavailable",
+    message: "PackWalk could not commit its current session view",
+  })
 
 const asCurrentSnapshot = (event: SessionEvent): SessionEvent =>
   event._tag === "SessionUpdated"
@@ -103,18 +120,15 @@ export const layer = Layer.effect(
     const initialResult = yield* source.discover().pipe(Effect.result)
 
     if (Result.isFailure(initialResult)) {
-      const unavailable = SessionEvent.cases.SessionUnavailable.make({
-        protocolVersion: 1,
-        code:
-          initialResult.failure.code === "unavailable"
-            ? "source-unavailable"
-            : "source-incompatible",
-        message: "PackWalk could not read supported Codex persisted evidence",
-      })
+      const unavailable = sourceUnavailableEvent(
+        initialResult.failure.code === "unavailable"
+          ? "source-unavailable"
+          : "source-incompatible",
+      )
       const eventState = yield* makeEventState(unavailable)
       return Service.of({
         events: eventState.events,
-        refresh: Effect.void,
+        refresh: Effect.fn("SessionSurface.refresh")(() => Effect.void),
         runPolling: Effect.never,
       })
     }
@@ -125,7 +139,7 @@ export const layer = Layer.effect(
       restored,
       initialFact,
       observedAtMs,
-      "discovery",
+      SessionTransitionTrigger.Discovery(),
     )
 
     if (Result.isFailure(initialDecision)) {
@@ -152,23 +166,26 @@ export const layer = Layer.effect(
     const eventState = yield* makeEventState(initialEvent)
     const transitionSemaphore = yield* Semaphore.make(1)
 
-    const refreshOnce = Effect.fn("SessionSurface.refreshOnce")(function* () {
+    const observeOnce = Effect.fn("SessionSurface.observeOnce")(function* (
+      trigger: SessionTransitionTrigger,
+    ) {
       const currentEvent = yield* eventState.currentEvent
       if (currentEvent._tag === "SessionUnavailable") {
         return
       }
 
-      const factResult = yield* source.discover().pipe(Effect.result)
+      const factResult = yield* (
+        trigger._tag === "Discovery"
+          ? source.discover()
+          : source.poll(currentEvent.view.sessionId)
+      ).pipe(Effect.result)
       if (Result.isFailure(factResult)) {
         yield* eventState.publish(
-          SessionEvent.cases.SessionUnavailable.make({
-            protocolVersion: 1,
-            code:
-              factResult.failure.code === "unavailable"
-                ? "source-unavailable"
-                : "source-incompatible",
-            message: "PackWalk could not read supported Codex persisted evidence",
-          }),
+          sourceUnavailableEvent(
+            factResult.failure.code === "unavailable"
+              ? "source-unavailable"
+              : "source-incompatible",
+          ),
         )
         return
       }
@@ -178,15 +195,14 @@ export const layer = Layer.effect(
         Option.some(currentEvent.view),
         factResult.success,
         now,
-        "discovery",
+        trigger,
       )
       if (Result.isFailure(decision)) {
+        if (trigger._tag === "Polling") {
+          return yield* decision.failure
+        }
         yield* eventState.publish(
-          SessionEvent.cases.SessionUnavailable.make({
-            protocolVersion: 1,
-            code: "source-incompatible",
-            message: "PackWalk could not read supported Codex persisted evidence",
-          }),
+          sourceUnavailableEvent("source-incompatible"),
         )
         return
       }
@@ -197,72 +213,32 @@ export const layer = Layer.effect(
           storage.commit(view).pipe(
             Effect.matchEffect({
               onFailure: () =>
-                eventState.publish(
-                  SessionEvent.cases.SessionUnavailable.make({
-                    protocolVersion: 1,
-                    code: "storage-unavailable",
-                    message: "PackWalk could not commit its current session view",
-                  }),
-                ),
+                eventState.publish(storageUnavailableEvent()),
               onSuccess: () => eventState.publish(event),
             }),
           ),
       })
     })
 
-    const refresh = transitionSemaphore.withPermit(refreshOnce())
-
-    const pollOnce = Effect.fn("SessionSurface.pollOnce")(function* () {
-      const currentEvent = yield* eventState.currentEvent
-      if (currentEvent._tag === "SessionUnavailable") {
-        return
-      }
-
-      const factResult = yield* source.poll(currentEvent.view.sessionId).pipe(
-        Effect.result,
-      )
-      if (Result.isFailure(factResult)) {
-        yield* eventState.publish(
-          SessionEvent.cases.SessionUnavailable.make({
-            protocolVersion: 1,
-            code:
-              factResult.failure.code === "unavailable"
-                ? "source-unavailable"
-                : "source-incompatible",
-            message: "PackWalk could not read supported Codex persisted evidence",
-          }),
-        )
-        return
-      }
-
-      const fact = factResult.success
-      const now = yield* Clock.currentTimeMillis
-      const decision = transitionSession(Option.some(currentEvent.view), fact, now)
-
-      if (Result.isFailure(decision)) {
-        return yield* decision.failure
-      }
-
-      yield* matchTransition(decision.success, {
-        NoChange: () => Effect.void,
-        Changed: ({ event, view }) =>
-          storage.commit(view).pipe(
-            Effect.matchEffect({
-              onFailure: () =>
-                eventState.publish(
-                  SessionEvent.cases.SessionUnavailable.make({
-                    protocolVersion: 1,
-                    code: "storage-unavailable",
-                    message: "PackWalk could not commit its current session view",
-                  }),
-                ),
-              onSuccess: () => eventState.publish(event),
-            }),
+    const refresh = Effect.fn("SessionSurface.refresh")(() =>
+      transitionSemaphore
+        .withPermit(observeOnce(SessionTransitionTrigger.Discovery()))
+        .pipe(
+          Effect.catch(() =>
+            eventState.publish(
+              sourceUnavailableEvent("source-incompatible"),
+            ),
           ),
-      })
-    })
+        ),
+    )
 
-    const runPolling = transitionSemaphore.withPermit(pollOnce()).pipe(
+    const pollOnce = Effect.fn("SessionSurface.pollOnce")(() =>
+      transitionSemaphore.withPermit(
+        observeOnce(SessionTransitionTrigger.Polling()),
+      ),
+    )
+
+    const runPolling = pollOnce().pipe(
       Effect.repeat(Schedule.spaced("1 second")),
       Effect.delay("1 second"),
       Effect.andThen(Effect.never),

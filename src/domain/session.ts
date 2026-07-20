@@ -115,7 +115,13 @@ export class IllegalSessionTransition extends Schema.TaggedErrorClass<IllegalSes
   },
 ) {}
 
-export type SessionTransitionSource = "discovery" | "poll"
+export type SessionTransitionTrigger = Data.TaggedEnum<{
+  Discovery: {}
+  Polling: {}
+}>
+
+export const SessionTransitionTrigger =
+  Data.taggedEnum<SessionTransitionTrigger>()
 
 type TransitionDecision = Data.TaggedEnum<{
   NoChange: {}
@@ -131,7 +137,7 @@ export const transitionSession = (
   current: Option.Option<SessionView>,
   fact: CodexPersistedFact,
   observedAtMs: number,
-  source: SessionTransitionSource = "poll",
+  trigger: SessionTransitionTrigger = SessionTransitionTrigger.Polling(),
 ): Result.Result<TransitionDecision, IllegalSessionTransition> => {
   if (Option.isNone(current)) {
     const view = SessionView.make({
@@ -157,7 +163,7 @@ export const transitionSession = (
 
   if (
     current.value.sessionId !== fact.sessionId &&
-    source === "poll"
+    trigger._tag === "Polling"
   ) {
     return Result.fail(new IllegalSessionTransition({ reason: "session-identity-changed" }))
   }
@@ -192,7 +198,7 @@ export const transitionSession = (
   }
 
   if (
-    (source === "discovery" || current.value.state._tag === "Polled") &&
+    (trigger._tag === "Discovery" || current.value.state._tag === "Polled") &&
     fact.sourceUpdatedAtMs === current.value.sourceUpdatedAtMs
   ) {
     return Result.succeed(TransitionDecision.NoChange())
