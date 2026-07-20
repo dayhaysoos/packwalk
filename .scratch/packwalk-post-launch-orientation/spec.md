@@ -2,6 +2,12 @@
 
 Status: ready-for-agent
 
+> **Delivery-scope note:** This specification defines PackWalk's polling-first
+> orientation delivery, not the complete product. “Out of scope” below means
+> out of this specification. PackWalk's accepted direction still includes
+> safely qualified exact-target intervention and stateless natural-language
+> routing; see ADRs 0003, 0004, and 0008.
+
 ## Problem Statement
 
 Developers can have several ordinary Codex sessions running at once, but Codex
@@ -36,7 +42,7 @@ identity and a trustworthy live observation path.
 The implementation remains local, per-user, Codex-only, content-light, and
 portable across Windows, macOS, and Linux. A later narrowly bounded experiment
 may attempt one real post-launch live event, but it cannot create another
-qualification campaign or alter the assistance-only product boundary.
+qualification campaign or alter the post-launch lifecycle boundary.
 
 ## User Stories
 
@@ -71,7 +77,7 @@ qualification campaign or alter the assistance-only product boundary.
 ## Implementation Decisions
 
 - The product is PackWalk and the canonical executable is `packwalk`.
-- PackWalk is assistance-only for this scope. It discovers and inspects ordinary Codex sessions that were already running before PackWalk. It does not create, launch, resume, restart, replace, relaunch, or interpose on a Codex session.
+- PackWalk is observation-only in this polling specification. It discovers and inspects ordinary Codex sessions that were already running before PackWalk. It does not create, launch, resume, restart, replace, relaunch, or interpose on a Codex session. This slice boundary does not remove the intervention direction recorded in ADR 0003.
 - Codex is the only supported agent. There is no provider registry, provider plugin system, generic provider identity, or speculative cross-agent abstraction.
 - A narrow Codex source adapter remains necessary to contain Codex-specific discovery, validation, version, and evidence semantics. Its purpose is replaceable Codex integration, not provider extensibility.
 - Persisted discovery does not establish post-launch live attachment. The domain uses distinct tagged states for discovered, polled, and watched sessions. Only a qualified exact live path may produce watched status.
@@ -97,7 +103,7 @@ qualification campaign or alter the assistance-only product boundary.
 - Migrations are repository-owned, immutable, ordered, checksummed, forward-only, and applied transactionally after a SQLite-aware backup. Detailed checkpoint and backup thresholds remain storage-operations decisions.
 - Durable observation is metadata-only. PackWalk persists exact identities, project locators, structural lifecycle/activity facts, provenance, freshness, versions, commit ordering, and omission facts. It does not persist prompts, responses, command output, diff content, terminal input, or raw Codex/tool payloads.
 - Logs and diagnostics are allowlisted structural metadata only. They never include raw IPC bodies, raw Codex payloads, user text, transcript content, command output, diffs, credentials, or environment snapshots.
-- The first implementation contains no consequential Codex action. Existing action-ledger, at-most-once, unknown-outcome, confirmation, and dispatch decisions remain binding constraints for a future action spec but do not expand this read-only slice.
+- The first implementation contains no consequential Codex action. The durable action authority and two-step protocol in [ADR 0008](../../docs/adr/0008-use-a-two-step-action-commit-protocol.md), together with the daemon and storage boundary in [ADR 0007](../../docs/adr/0007-use-daemon-owned-node-sqlite.md), remain binding constraints for a future action specification but do not expand this read-only slice.
 - A narrowly bounded later experiment may attempt to observe one real post-launch live event for the exact already-running session. It may start a connection-only helper when that helper cannot create, resume, restart, replace, or initiate Codex work, but it may not introduce a PackWalk-owned Codex session, wrapper launch, `--remote` prerequisite, relay, qualification harness, or Wayfinder campaign.
 - Only a successful, reproducible live experiment may justify a later implementation that promotes a session from discovered/polled to watched. Failure leaves the polling slice intact and truthfully degraded.
 - The initial project is one small package with an exact lockfile. npm is the default package manager because it ships with Node and does not add another runtime requirement. A workspace or bundler requires demonstrated need.
@@ -122,15 +128,18 @@ qualification campaign or alter the assistance-only product boundary.
 - Windows, macOS, and Linux CI run the deterministic daemon/storage/IPC/client seam. Real-Codex integration is separately qualified on available operating-system and architecture artifacts.
 - The post-launch live-event experiment has one success criterion: after PackWalk starts, correlate one newly emitted event to the exact ordinary running Codex session without changing its lifecycle or launch topology. A negative result is valid and must remain bounded.
 
-## Out of Scope
+## Out of Scope for This Polling Specification
+
+These exclusions constrain the current delivery only. Product direction is
+defined by `docs/product.md`, `docs/roadmap.md`, and the accepted ADRs.
 
 - Creating, launching, resuming, restarting, replacing, relaunching, or wrapping Codex sessions.
 - Requiring `--remote`, a PackWalk-owned app-server, a PackWalk-owned relay, or any pre-launch PackWalk registration.
 - Calling a discovered or polled session live or watched without trustworthy post-launch attachment.
-- Consequential actions such as asking, steering, approving, rejecting, interrupting, or starting an idle turn.
+- Consequential actions such as asking, steering, approving, rejecting, or interrupting. Those actions are intended after separate exact-target qualification. Starting an idle turn remains a separate future product decision.
 - A provider registry, provider plugins, support for non-Codex agents, or generic cross-provider semantics.
 - Transcript parsing as an unlabelled trusted source, raw-provider persistence, rich optional content capture, searchable transcript history, or secret-completeness claims.
-- Remote clients, public listeners, tunnels, accounts, multi-user authorization, delegated approval, or cryptographic capability protocols.
+- Remote clients, public listeners, tunnels, accounts, multi-user authorization, delegated approval, or cryptographic capability protocols. Remote supervision remains a gated bonus horizon rather than a current requirement.
 - A persistent dashboard, terminal UI framework, editor extension, browser client, mobile client, or public SDK.
 - Operating-system notifications, login-start services, detailed installer UX, standalone executable packaging, signing, and notarization.
 - Consequential-action implementation, action dispatch qualification, and adoption of Effect Workflow.
@@ -140,6 +149,9 @@ qualification campaign or alter the assistance-only product boundary.
 
 - [ADR 0001](../../docs/adr/0001-require-post-launch-attachment.md) is authoritative for the product boundary. Superseded wrapper and relay artifacts are historical evidence only; they are not implementation requirements, release gates, or blockers.
 - [ADR 0002](../../docs/adr/0002-use-a-plain-command-line-interface.md) is authoritative for the CLI-only interface boundary and records why the initial public specification was corrected.
+- [ADR 0003](../../docs/adr/0003-define-post-launch-supervision-and-intervention.md) distinguishes this polling slice from PackWalk's complete product direction.
+- [ADR 0004](../../docs/adr/0004-use-stateless-codex-routing-for-natural-language-commands.md) records the intended one-off natural-language routing boundary without adding it to this slice.
+- [ADR 0008](../../docs/adr/0008-use-a-two-step-action-commit-protocol.md) replaces the dangling reference to unpublished action-ledger decisions.
 - Exact dependency versions are selected during initialization, pinned in the manifest and lockfile, and upgraded only through deliberate qualification.
 - The daemon public session query/event surface is approved as the primary seam unless implementation reveals an actual repository contradiction. No such contradiction exists in the current corrected repository.
 - The first ticket must remain visibly demoable even though the repository currently has no production TypeScript. It therefore establishes only the minimum end-to-end skeleton needed for one real polled session and leaves breadth, hardening, and release engineering to later tracer bullets.

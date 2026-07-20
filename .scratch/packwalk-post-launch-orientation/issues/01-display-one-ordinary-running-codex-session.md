@@ -1,6 +1,6 @@
 # Display one ordinary running Codex session
 
-Status: ready-for-human
+Status: ready-for-agent
 Blocked by: none
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -25,7 +25,9 @@ updates once after polling detects later Codex activity.
 - [x] The daemon's public session query/event surface returns the initial
       committed view and one committed update after the deterministic source
       changes.
-- [x] One compact plain CLI table consumes that public surface and, on a
+- [ ] One compact plain CLI table consumes that public surface, visibly presents
+      the real project, exact session identity, supported activity, evidence
+      source, freshness, observation/update time, and honest state, and, on a
       capable terminal with enough width, refreshes the same lines after the
       polling update without claiming the session is live or watched. Other
       outputs remain readable by appending plain-text tables.
@@ -64,3 +66,15 @@ repository-local execution of the package binary is required.
   terminal run of the corrected compact table redrew the same two lines after
   real persisted updates. Keep this ticket open until the maintainer
   reproduces that documented command.
+- 2026-07-19: Maintainer acceptance is reopened. During a later real use, the
+  table did not visibly update while Codex activity continued. Polling must not
+  be described as trustworthy live or real-time attachment, but this ticket
+  still requires a visible new frame after the supported Codex persisted source
+  changes. Diagnose the source poll, committed daemon publication, IPC delivery,
+  and terminal redraw seams; deterministic tests do not override the failed
+  personal demonstration.
+- 2026-07-19: Documentation review also found that the current compact table
+  deliberately omits exact session identity, evidence source, and freshness
+  even though the maintainer's accepted runnable demonstration requires those
+  fields to be visible. The PackWalk public view already carries them; Ticket 01
+  remains open until its human CLI presents them as well as visibly polling.

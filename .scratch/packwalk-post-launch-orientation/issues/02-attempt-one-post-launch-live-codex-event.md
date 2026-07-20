@@ -10,6 +10,13 @@ One bounded experiment, completable in one fresh implementation session, that
 tests whether PackWalk can correlate one newly emitted live event to the exact
 ordinary Codex session that was already running when PackWalk started.
 
+This experiment decides what PackWalk may truthfully call `watched`; it does
+not redefine PackWalk as permanently read-only. The intended intervention
+direction remains recorded in
+[ADR 0003](../../../docs/adr/0003-define-post-launch-supervision-and-intervention.md),
+while actual control stays unavailable until an exact observation and control
+path is separately qualified.
+
 ## Acceptance criteria
 
 - [ ] The experiment begins with an ordinary Codex TUI, starts PackWalk later,

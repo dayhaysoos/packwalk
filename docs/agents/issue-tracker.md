@@ -4,6 +4,9 @@ Issues and specs for this repository live as Markdown files in `.scratch/`.
 Do not use a remote issue tracker unless this configuration is deliberately
 changed later.
 
+The files are versioned with the public repository. Do not duplicate them as
+GitHub Issues.
+
 ## Conventions
 
 - One feature or effort per directory: `.scratch/<feature-slug>/`
@@ -13,6 +16,17 @@ changed later.
 - Do not create a single combined tickets file.
 - Triage state is a `Status:` line near the top of each issue file.
 - Comments and conversation history append under a `## Comments` heading.
+
+## Scope and authority
+
+An issue or specification describes one bounded delivery effort. Its “out of
+scope” language applies to that effort unless it explicitly records a broader
+accepted product decision. It cannot silently narrow `docs/product.md` or
+supersede an accepted ADR.
+
+When implementation status, acceptance, or the active blocker changes, update
+the issue and `docs/current-state.md` together so a fresh agent receives the
+same handoff from both.
 
 ## Publishing and fetching
 
@@ -38,4 +52,3 @@ Wayfinder uses one map with one child file per investigation:
 - **Claim:** Set `Status: claimed` and save before starting work.
 - **Resolve:** Append the result under `## Answer`, set `Status: resolved`, and
   append a concise context pointer and link to the map's Decisions-so-far.
-
