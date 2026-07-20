@@ -260,9 +260,22 @@ text and protocol-v2 JSON with zero exits and empty stderr. After another
 ordinary persisted turn boundary, only this task's exact row advanced; the
 other 18 serialized view hashes and the identity set remained unchanged. The
 test-started v2 daemon was stopped by its verified endpoint-owning PID, while
-the pre-existing v1 daemon remained running. Ticket 04 remains claimed for a
-wholly fresh generic review and independent product preflight. Neither has yet
-reported a final verdict.
+the pre-existing v1 daemon remained running. Fresh generic review pass 2 was
+clean on Specification and found three Standards defects; all three now have
+red-first regressions and repairs. Each poll response is bound to its requested
+exact identity, with crossed evidence surfaced as redacted
+`source-incompatible` and no stored mutation. Production endpoint authority
+resolves durable database aliases to physical identity, including the nearest
+existing ancestor before the database exists. Unix endpoint setup opens the
+leaf without following links, verifies that it is a directory owned by the
+current user, and applies mode `0700` through the verified descriptor; the
+PackWalk data directory remains private too. Focused verification passes 25
+tests, `npm run verify` passes 21 files and 96 tests plus typecheck, lint, and
+build, and the opt-in persisted-Codex check passes in 8.22 seconds. The compiled
+product again returned all 19 unique exact identities through text and
+protocol-v2 JSON with zero exits and empty stderr. Ticket 04 remains claimed
+for another wholly fresh generic review; independent product preflight has not
+started.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 

@@ -139,6 +139,123 @@ it.effect("adds a discovered identity without replacing a restored exact session
   }),
 )
 
+it.effect("rejects crossed exact polling results before publishing a session update", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const firstSessionId =
+      "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+    const secondSessionId =
+      "019f77d2-1a10-7cf0-b5df-76eebb4071ad"
+    const surface = yield* makeDeterministicSessionSurface(
+      [
+        CodexPersistedFact.make({
+          version: 1,
+          sessionId: SessionIdentity.make(firstSessionId),
+          projectIdentity: ProjectIdentity.make("shared-project"),
+          sourceUpdatedAtMs: 1_000,
+        }),
+        CodexPersistedFact.make({
+          version: 1,
+          sessionId: SessionIdentity.make(secondSessionId),
+          projectIdentity: ProjectIdentity.make("shared-project"),
+          sourceUpdatedAtMs: 1_500,
+        }),
+      ],
+      { crossPollResults: true },
+    )
+    const initialObserved = yield* Deferred.make<void>()
+    const published = yield* surface.events.pipe(
+      Stream.tap((event) =>
+        event._tag === "SessionsSnapshot"
+          ? Deferred.succeed(initialObserved, undefined)
+          : Effect.void,
+      ),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+
+    yield* Deferred.await(initialObserved)
+    yield* TestClock.adjust("1 second")
+
+    expect(Array.from(yield* Fiber.join(published))).toEqual([
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [
+          {
+            protocolVersion: 1,
+            sessionId: firstSessionId,
+            projectIdentity: "shared-project",
+            activity: "persisted Codex activity",
+            evidenceSource: "codex-sqlite-thread-index",
+            state: { _tag: "Discovered" },
+            freshness: "fresh",
+            sourceUpdatedAtMs: 1_000,
+            observedAtMs: 2_000,
+            commitSequence: 1,
+          },
+          {
+            protocolVersion: 1,
+            sessionId: secondSessionId,
+            projectIdentity: "shared-project",
+            activity: "persisted Codex activity",
+            evidenceSource: "codex-sqlite-thread-index",
+            state: { _tag: "Discovered" },
+            freshness: "fresh",
+            sourceUpdatedAtMs: 1_500,
+            observedAtMs: 2_000,
+            commitSequence: 2,
+          },
+        ],
+      },
+      {
+        _tag: "SessionUnavailable",
+        protocolVersion: 2,
+        code: "source-incompatible",
+        message: "PackWalk could not read supported Codex persisted evidence",
+      },
+    ])
+
+    yield* surface.refresh()
+    const current = Array.from(
+      yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(current).toEqual([
+      {
+        _tag: "SessionsSnapshot",
+        protocolVersion: 2,
+        views: [
+          {
+            protocolVersion: 1,
+            sessionId: firstSessionId,
+            projectIdentity: "shared-project",
+            activity: "persisted Codex activity",
+            evidenceSource: "codex-sqlite-thread-index",
+            state: { _tag: "Discovered" },
+            freshness: "fresh",
+            sourceUpdatedAtMs: 1_000,
+            observedAtMs: 2_000,
+            commitSequence: 1,
+          },
+          {
+            protocolVersion: 1,
+            sessionId: secondSessionId,
+            projectIdentity: "shared-project",
+            activity: "persisted Codex activity",
+            evidenceSource: "codex-sqlite-thread-index",
+            state: { _tag: "Discovered" },
+            freshness: "fresh",
+            sourceUpdatedAtMs: 1_500,
+            observedAtMs: 2_000,
+            commitSequence: 2,
+          },
+        ],
+      },
+    ])
+  }),
+)
+
 it.effect("publishes the first successful reread once before later persisted activity", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
@@ -492,14 +609,12 @@ it.effect("surfaces an unrecoverable polling worker failure to the daemon owner"
       Effect.flip,
       Effect.forkChild,
     )
-    yield* packWalk.persistSourceIdentityForTest(
-      "019f77d2-1a10-7cf0-b5df-76eebb4071ac",
-    )
+    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 500 })
     yield* TestClock.adjust("1 second")
 
     expect(yield* Fiber.join(runtimeFailure)).toMatchObject({
       _tag: "PackWalk.IllegalSessionTransition",
-      reason: "session-identity-changed",
+      reason: "source-time-regressed",
     })
   }),
 )

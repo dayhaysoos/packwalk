@@ -96,3 +96,28 @@ sessions overlap, share a repository, or have duplicate display labels.
   the pre-existing v1 daemon remained running. Ticket 04 stays claimed only
   for a wholly fresh generic review and independent product preflight; no
   maintainer acceptance is claimed.
+- 2026-07-20: Fresh generic review pass 2 reports zero actionable
+  Specification findings and three actionable Standards findings. Polling can
+  sort two swapped exact-ID responses back into apparently valid order; Unix
+  and Windows endpoint tokens use lexical rather than physical database
+  identity; and the predictable Unix `/tmp` directory is accepted and
+  `chmod`ed without first rejecting a symlink or foreign owner. Ticket 04
+  remains claimed while red regressions bind each poll request to its response,
+  canonicalize durable authority aliases, and prove secure endpoint-directory
+  creation. Full verification and an entirely fresh generic review follow;
+  product preflight has not started.
+- 2026-07-20: All three pass-2 Standards defects are repaired with red-first
+  regressions. Every poll response is now bound to the exact identity that was
+  requested; crossed responses publish the redacted protocol-v2
+  `source-incompatible` result and leave the stored snapshot unchanged.
+  Production endpoint authority resolves a database or its nearest existing
+  ancestor to physical durable identity, so launch-time path aliases converge.
+  Unix endpoint setup opens the leaf with `O_NOFOLLOW | O_DIRECTORY`, verifies
+  the real directory and current owner, and changes permissions through the
+  verified descriptor; the PackWalk data directory remains private as well.
+  Focused verification passes 25 tests, `npm run verify` passes 21 files and 96
+  tests plus typecheck, lint, and build, and the opt-in persisted-Codex check
+  passes in 8.22 seconds. The compiled product again returned all 19 unique
+  exact identities through text and protocol-v2 JSON with zero exits and empty
+  stderr. Ticket 04 remains claimed for a wholly fresh generic review and
+  independent product preflight; no maintainer acceptance is claimed.

@@ -1,6 +1,21 @@
 import { createHash } from "node:crypto"
+import {
+  closeSync,
+  constants as fileSystemConstants,
+  fchmodSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+} from "node:fs"
 import { homedir } from "node:os"
-import { posix, win32 } from "node:path"
+import {
+  basename,
+  dirname,
+  join as nativeJoin,
+  posix,
+  win32,
+} from "node:path"
 
 import {
   Config,
@@ -33,6 +48,44 @@ export interface RuntimePathsValue {
 // installed client cannot silently connect to a persistent older daemon.
 const sessionIpcNamespace = "v2"
 
+export type DurablePathCanonicalizer = (path: string) => string
+
+const nodeErrorCode = (error: unknown): string | undefined =>
+  typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : undefined
+
+/**
+ * Resolves the physical identity of an existing path, or resolves its nearest
+ * existing ancestor before restoring the missing suffix. This keeps endpoint
+ * authority stable while SQLite creates a database beneath an aliased data
+ * directory.
+ */
+export const canonicalizeNativeDurablePath: DurablePathCanonicalizer = (
+  path,
+) => {
+  const missingSegments: Array<string> = []
+  let candidate = path
+
+  while (true) {
+    try {
+      return nativeJoin(realpathSync.native(candidate), ...missingSegments)
+    } catch (error) {
+      if (nodeErrorCode(error) !== "ENOENT") {
+        throw error
+      }
+
+      const parent = dirname(candidate)
+      if (parent === candidate) {
+        throw error
+      }
+
+      missingSegments.unshift(basename(candidate))
+      candidate = parent
+    }
+  }
+}
+
 const durableDatabaseToken = (
   path: string,
   platform: RuntimePathInputs["platform"],
@@ -50,6 +103,7 @@ const durableDatabaseToken = (
 
 export const deriveRuntimePaths = (
   input: RuntimePathInputs,
+  canonicalizeDurablePath: DurablePathCanonicalizer = (path) => path,
 ): RuntimePathsValue => {
   const path = input.platform === "win32" ? win32 : posix
 
@@ -80,7 +134,7 @@ export const deriveRuntimePaths = (
       "packwalk-v2.sqlite",
     )
     const databaseToken = durableDatabaseToken(
-      packWalkDatabasePath,
+      canonicalizeDurablePath(packWalkDatabasePath),
       input.platform,
     )
     return {
@@ -109,7 +163,7 @@ export const deriveRuntimePaths = (
     "packwalk-v2.sqlite",
   )
   const databaseToken = durableDatabaseToken(
-    packWalkDatabasePath,
+    canonicalizeDurablePath(packWalkDatabasePath),
     input.platform,
   )
   const ipcDirectory = posix.join(
@@ -163,19 +217,22 @@ const resolveRuntimePaths = Effect.gen(function* () {
       }
 
       return RuntimePaths.of(
-        deriveRuntimePaths({
-          platform: process.platform,
-          homeDirectory: homedir(),
-          ...(Option.isSome(codexHome)
-            ? { codexHome: codexHome.value }
-            : {}),
-          ...(Option.isSome(localAppData)
-            ? { localAppData: localAppData.value }
-            : {}),
-          ...(Option.isSome(xdgDataHome)
-            ? { xdgDataHome: xdgDataHome.value }
-            : {}),
-        }),
+        deriveRuntimePaths(
+          {
+            platform: process.platform,
+            homeDirectory: homedir(),
+            ...(Option.isSome(codexHome)
+              ? { codexHome: codexHome.value }
+              : {}),
+            ...(Option.isSome(localAppData)
+              ? { localAppData: localAppData.value }
+              : {}),
+            ...(Option.isSome(xdgDataHome)
+              ? { xdgDataHome: xdgDataHome.value }
+              : {}),
+          },
+          canonicalizeNativeDurablePath,
+        ),
       )
     },
     catch: (error) => error,
@@ -191,6 +248,48 @@ const resolveRuntimePaths = Effect.gen(function* () {
 
 export const runtimePathsLayer = Layer.effect(RuntimePaths, resolveRuntimePaths)
 
+const securePrivateUnixDirectory = (
+  directory: string,
+  currentUid: number,
+): void => {
+  try {
+    mkdirSync(directory, { mode: 0o700 })
+  } catch (error) {
+    if (nodeErrorCode(error) !== "EEXIST") {
+      throw error
+    }
+  }
+
+  const descriptor = openSync(
+    directory,
+    fileSystemConstants.O_RDONLY |
+      fileSystemConstants.O_DIRECTORY |
+      fileSystemConstants.O_NOFOLLOW,
+  )
+
+  try {
+    const opened = fstatSync(descriptor)
+    if (!opened.isDirectory() || opened.uid !== currentUid) {
+      throw new Error("Unsafe Unix endpoint directory")
+    }
+
+    if ((opened.mode & 0o777) !== 0o700) {
+      fchmodSync(descriptor, 0o700)
+    }
+
+    const secured = fstatSync(descriptor)
+    if (
+      !secured.isDirectory() ||
+      secured.uid !== currentUid ||
+      (secured.mode & 0o777) !== 0o700
+    ) {
+      throw new Error("Unsafe Unix endpoint directory")
+    }
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
 export const prepareRuntimeDirectories = Effect.gen(function* () {
   const paths = yield* RuntimePaths
   const fileSystem = yield* FileSystem.FileSystem
@@ -200,12 +299,21 @@ export const prepareRuntimeDirectories = Effect.gen(function* () {
     mode: 0o700,
   })
 
-  if (paths.ipcDirectory !== undefined) {
+  const ipcDirectory = paths.ipcDirectory
+  if (ipcDirectory !== undefined) {
     yield* fileSystem.chmod(paths.packWalkDataDirectory, 0o700)
-    yield* fileSystem.makeDirectory(paths.ipcDirectory, {
-      recursive: true,
-      mode: 0o700,
+    yield* Effect.try({
+      try: () => {
+        if (process.getuid === undefined) {
+          throw new Error("Unix user identity is unavailable")
+        }
+
+        securePrivateUnixDirectory(ipcDirectory, process.getuid())
+      },
+      catch: () =>
+        new RuntimePathError({
+          message: "PackWalk could not secure its local runtime directory",
+        }),
     })
-    yield* fileSystem.chmod(paths.ipcDirectory, 0o700)
   }
 })

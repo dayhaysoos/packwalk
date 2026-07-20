@@ -1,8 +1,25 @@
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect } from "effect"
+import { ConfigProvider, Effect, Layer, Result } from "effect"
 
 import {
+  canonicalizeNativeDurablePath,
   deriveRuntimePaths,
+  prepareRuntimeDirectories,
   RuntimePaths,
   runtimePathsLayer,
 } from "../src/adapters/runtime-paths.js"
@@ -124,6 +141,169 @@ describe("PackWalk runtime paths", () => {
     expect(sameDatabase.ipcEndpoint).toBe(first.ipcEndpoint)
     expect(differentDatabase.ipcEndpoint).not.toBe(first.ipcEndpoint)
   })
+
+  it.skipIf(process.platform === "win32")(
+    "uses one endpoint for physical database aliases before and after the database exists",
+    () => {
+      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-path-alias-test-"))
+
+      try {
+        const physicalDataRoot = join(testRoot, "physical-data")
+        const directoryAlias = join(testRoot, "directory-alias")
+        mkdirSync(physicalDataRoot)
+        symlinkSync(physicalDataRoot, directoryAlias, "dir")
+
+        const physicalBeforeCreation = deriveRuntimePaths(
+          {
+            platform: "linux",
+            homeDirectory: "/home/example",
+            xdgDataHome: physicalDataRoot,
+          },
+          canonicalizeNativeDurablePath,
+        )
+        const aliasedBeforeCreation = deriveRuntimePaths(
+          {
+            platform: "linux",
+            homeDirectory: "/different/launch-home",
+            xdgDataHome: directoryAlias,
+          },
+          canonicalizeNativeDurablePath,
+        )
+
+        expect(aliasedBeforeCreation.packWalkDatabasePath).not.toBe(
+          physicalBeforeCreation.packWalkDatabasePath,
+        )
+        expect(aliasedBeforeCreation.ipcEndpoint).toBe(
+          physicalBeforeCreation.ipcEndpoint,
+        )
+
+        mkdirSync(join(physicalDataRoot, "packwalk"))
+        writeFileSync(physicalBeforeCreation.packWalkDatabasePath, "database")
+        const fileAliasDataRoot = join(testRoot, "file-alias-data")
+        mkdirSync(join(fileAliasDataRoot, "packwalk"), { recursive: true })
+        symlinkSync(
+          physicalBeforeCreation.packWalkDatabasePath,
+          join(fileAliasDataRoot, "packwalk", "packwalk-v2.sqlite"),
+          "file",
+        )
+
+        const aliasedExistingFile = deriveRuntimePaths(
+          {
+            platform: "linux",
+            homeDirectory: "/another/launch-home",
+            xdgDataHome: fileAliasDataRoot,
+          },
+          canonicalizeNativeDurablePath,
+        )
+
+        expect(
+          readFileSync(aliasedExistingFile.packWalkDatabasePath, "utf8"),
+        ).toBe("database")
+        expect(aliasedExistingFile.ipcEndpoint).toBe(
+          physicalBeforeCreation.ipcEndpoint,
+        )
+      } finally {
+        rmSync(testRoot, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.effect.skipIf(process.platform === "win32")(
+    "rejects a symlinked Unix endpoint directory without changing its target",
+    () => {
+      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-ipc-symlink-test-"))
+      const targetDirectory = join(testRoot, "target")
+      const ipcDirectory = join(testRoot, "predictable-ipc-leaf")
+      mkdirSync(targetDirectory, { mode: 0o755 })
+      chmodSync(targetDirectory, 0o755)
+      symlinkSync(targetDirectory, ipcDirectory, "dir")
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+        )
+        const preparation = yield* Effect.result(prepareRuntimeDirectories)
+
+        expect(Result.isFailure(preparation)).toBe(true)
+        expect(lstatSync(ipcDirectory).isSymbolicLink()).toBe(true)
+        expect(statSync(targetDirectory).mode & 0o777).toBe(0o755)
+      }).pipe(
+        Effect.provide(
+          Layer.succeed(
+            RuntimePaths,
+            RuntimePaths.of({
+              codexDatabasePath: join(testRoot, "codex.sqlite"),
+              packWalkDataDirectory: join(testRoot, "data"),
+              legacyPackWalkDatabasePath: join(
+                testRoot,
+                "data",
+                "packwalk.sqlite",
+              ),
+              packWalkDatabasePath: join(
+                testRoot,
+                "data",
+                "packwalk-v2.sqlite",
+              ),
+              ipcDirectory,
+              ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
+            }),
+          ),
+        ),
+        Effect.provide(NodeServices.layer),
+        Effect.scoped,
+      )
+    },
+  )
+
+  it.effect.skipIf(process.platform === "win32")(
+    "creates and re-secures an owned Unix endpoint directory with private permissions",
+    () => {
+      const testRoot = mkdtempSync(join(tmpdir(), "packwalk-ipc-private-test-"))
+      const dataDirectory = join(testRoot, "data")
+      const ipcDirectory = join(testRoot, "predictable-ipc-leaf")
+      mkdirSync(dataDirectory, { mode: 0o777 })
+      chmodSync(dataDirectory, 0o777)
+      const runtimePaths = RuntimePaths.of({
+        codexDatabasePath: join(testRoot, "codex.sqlite"),
+        packWalkDataDirectory: dataDirectory,
+        legacyPackWalkDatabasePath: join(
+          testRoot,
+          "data",
+          "packwalk.sqlite",
+        ),
+        packWalkDatabasePath: join(
+          testRoot,
+          "data",
+          "packwalk-v2.sqlite",
+        ),
+        ipcDirectory,
+        ipcEndpoint: join(ipcDirectory, "daemon-v2.sock"),
+      })
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+        )
+        yield* prepareRuntimeDirectories
+
+        const created = lstatSync(ipcDirectory)
+        expect(created.isDirectory()).toBe(true)
+        expect(created.isSymbolicLink()).toBe(false)
+        expect(created.uid).toBe(process.getuid?.())
+        expect(created.mode & 0o777).toBe(0o700)
+        expect(lstatSync(dataDirectory).mode & 0o777).toBe(0o700)
+
+        chmodSync(ipcDirectory, 0o777)
+        yield* prepareRuntimeDirectories
+
+        expect(lstatSync(ipcDirectory).mode & 0o777).toBe(0o700)
+      }).pipe(
+        Effect.provide(Layer.succeed(RuntimePaths, runtimePaths)),
+        Effect.provide(NodeServices.layer),
+        Effect.scoped,
+      )
+    },
+  )
 
   it.each([
     {

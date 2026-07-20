@@ -37,9 +37,11 @@ interface PersistSourceUpdate {
 export interface DeterministicSessionSurface {
   readonly events: Stream.Stream<SessionEvent>
   readonly persistSourceUpdate: PersistSourceUpdate
+  readonly refresh: () => Effect.Effect<void>
 }
 
 export interface DeterministicSessionSurfaceOptions {
+  readonly crossPollResults?: boolean
   readonly restored?: SessionView | ReadonlyArray<SessionView>
 }
 
@@ -125,7 +127,15 @@ export const makeDeterministicSessionSurface = (
     )
     const readExact = Effect.fn("SessionSource.SurfaceTest.readExact")(
       function* (sessionId: typeof SessionIdentity.Type) {
-        const matches = (yield* readAll()).filter((fact) =>
+        const facts = yield* readAll()
+        if (options.crossPollResults === true) {
+          const crossed = facts.find((fact) =>
+            !sameSessionIdentity(fact.sessionId, sessionId),
+          )
+          if (crossed !== undefined) return crossed
+        }
+
+        const matches = facts.filter((fact) =>
           sameSessionIdentity(fact.sessionId, sessionId),
         )
         if (matches.length === 0) return yield* sourceError("unavailable")
@@ -208,5 +218,6 @@ export const makeDeterministicSessionSurface = (
     return {
       events: surface.events,
       persistSourceUpdate,
+      refresh: surface.refresh,
     }
   })

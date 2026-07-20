@@ -23,6 +23,7 @@ import {
 import {
   matchTransition,
   matchSessionTransitionTrigger,
+  sameSessionIdentity,
   type IllegalSessionTransition,
   SessionEvent,
   SessionProtocolEvent,
@@ -369,6 +370,18 @@ export const layer = Layer.effect(
       initial.snapshot,
     )
     const transitionSemaphore = yield* Semaphore.make(1)
+    const pollExactSession = Effect.fn("SessionSurface.pollExactSession")(
+      function* (view: SessionView) {
+        const fact = yield* source.poll(view.sessionId)
+        if (!sameSessionIdentity(view.sessionId, fact.sessionId)) {
+          return yield* new SessionSourceError({
+            code: "invalid-evidence",
+            message: "Codex persisted evidence is incompatible",
+          })
+        }
+        return fact
+      },
+    )
 
     const observeOnce = Effect.fn("SessionSurface.observeOnce")(function* (
       trigger: SessionTransitionTrigger,
@@ -392,7 +405,7 @@ export const layer = Layer.effect(
                 }),
               )
             : Effect.forEach(current.views, (view) =>
-                source.poll(view.sessionId),
+                pollExactSession(view),
               ),
       }).pipe(Effect.result)
       if (Result.isFailure(factResult)) {

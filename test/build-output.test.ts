@@ -15,7 +15,10 @@ import { fileURLToPath } from "node:url"
 
 import { expect, it } from "vitest"
 
-import { deriveRuntimePaths } from "../src/adapters/runtime-paths.js"
+import {
+  canonicalizeNativeDurablePath,
+  deriveRuntimePaths,
+} from "../src/adapters/runtime-paths.js"
 import {
   runBoundedCommand,
   terminateActiveProcessTrees,
@@ -101,13 +104,16 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
     mkdirSync(directory, { recursive: true })
   }
 
-  const runtimePaths = deriveRuntimePaths({
-    platform: process.platform,
-    homeDirectory,
-    codexHome,
-    localAppData,
-    xdgDataHome: dataDirectory,
-  })
+  const runtimePaths = deriveRuntimePaths(
+    {
+      platform: process.platform,
+      homeDirectory,
+      codexHome,
+      localAppData,
+      xdgDataHome: dataDirectory,
+    },
+    canonicalizeNativeDurablePath,
+  )
   if (runtimePaths.ipcDirectory !== undefined) {
     mkdirSync(dirname(runtimePaths.ipcEndpoint), { recursive: true })
   }
