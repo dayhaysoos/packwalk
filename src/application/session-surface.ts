@@ -58,6 +58,12 @@ interface ObservationDecision {
   readonly lastCommitSequence: number
 }
 
+interface FinalizedObservation {
+  readonly event: SessionProtocolEvent
+  readonly snapshot: SessionStorageSnapshot
+  readonly publish: boolean
+}
+
 interface ExactPollOutcome {
   readonly view: SessionView
   readonly result: Result.Result<CodexPersistedFact, SessionSourceError>
@@ -292,6 +298,9 @@ const reduceDiscovery = Effect.fn("SessionSurface.reduceDiscovery")(
   ) {
     const facts = yield* validateFacts(sourceFacts)
     const accumulator = makeObservationAccumulator(current)
+    const discoveredIdentities = new Set(
+      facts.map((fact) => fact.sessionId),
+    )
 
     for (const fact of facts) {
       const currentView = accumulator.nextByIdentity.get(fact.sessionId)
@@ -321,6 +330,18 @@ const reduceDiscovery = Effect.fn("SessionSurface.reduceDiscovery")(
       }
 
       recordSessionTransition(accumulator, decision.success)
+    }
+
+    for (const currentView of current.views) {
+      if (discoveredIdentities.has(currentView.sessionId)) continue
+      recordSessionTransition(
+        accumulator,
+        degradeSession(
+          currentView,
+          "source-unavailable",
+          accumulator.lastCommitSequence + 1,
+        ),
+      )
     }
 
     return yield* completeObservation(accumulator)
@@ -489,51 +510,83 @@ export const layer = Layer.effect(
       )
     })
 
+    const finalizeObservation = Effect.fn(
+      "SessionSurface.finalizeObservation",
+    )(function* (
+      current: SessionStorageSnapshot,
+      currentEvent: SessionProtocolEvent | undefined,
+      reducedResult: Result.Result<ObservationDecision, SessionSourceError>,
+    ) {
+      if (Result.isFailure(reducedResult)) {
+        return {
+          event: sourceErrorEvent(reducedResult.failure),
+          snapshot: current,
+          publish: true,
+        } satisfies FinalizedObservation
+      }
+
+      const reduced = reducedResult.success
+      const requiresSnapshot =
+        currentEvent === undefined || currentEvent._tag === "SessionUnavailable"
+      if (reduced.changedViews.length === 0 && !requiresSnapshot) {
+        return {
+          event: currentEvent,
+          snapshot: current,
+          publish: false,
+        } satisfies FinalizedObservation
+      }
+
+      const eventResult = yield* (
+        requiresSnapshot
+          ? ensurePublishableEvent(snapshotEvent(reduced.views))
+          : selectPublishableEvent(reduced)
+      ).pipe(Effect.result)
+      if (Result.isFailure(eventResult)) {
+        return {
+          event: overviewUnavailableEvent(),
+          snapshot: current,
+          publish: true,
+        } satisfies FinalizedObservation
+      }
+
+      if (reduced.changedViews.length === 0) {
+        return {
+          event: eventResult.success,
+          snapshot: current,
+          publish: true,
+        } satisfies FinalizedObservation
+      }
+
+      const nextSnapshot: SessionStorageSnapshot = {
+        views: reduced.views,
+        lastCommitSequence: reduced.lastCommitSequence,
+      }
+      const commitResult = yield* storage
+        .commit(current.lastCommitSequence, reduced.changedViews)
+        .pipe(Effect.result)
+      return Result.isFailure(commitResult)
+        ? {
+            event: storageUnavailableEvent(),
+            snapshot: current,
+            publish: true,
+          } satisfies FinalizedObservation
+        : {
+            event: eventResult.success,
+            snapshot: nextSnapshot,
+            publish: true,
+          } satisfies FinalizedObservation
+    })
+
     const restored = yield* storage.load()
     const initialResult = yield* reconcile(
       restored,
       SessionTransitionTrigger.Discovery(),
     ).pipe(Effect.result)
-    const initial = Result.isFailure(initialResult)
-      ? {
-          event:
-            initialResult.failure instanceof SessionSourceError
-              ? sourceErrorEvent(initialResult.failure)
-              : sourceUnavailableEvent("source-incompatible"),
-          snapshot: restored,
-        }
-      : yield* Effect.gen(function* () {
-          const reduced = initialResult.success
-          const eventResult = yield* ensurePublishableEvent(
-            snapshotEvent(reduced.views),
-          ).pipe(Effect.result)
-          if (Result.isFailure(eventResult)) {
-            return {
-              event: overviewUnavailableEvent(),
-              snapshot: restored,
-            }
-          }
-
-          if (reduced.changedViews.length > 0) {
-            const commitResult = yield* storage
-              .commit(restored.lastCommitSequence, reduced.changedViews)
-              .pipe(Effect.result)
-            if (Result.isFailure(commitResult)) {
-              return {
-                event: storageUnavailableEvent(),
-                snapshot: restored,
-              }
-            }
-          }
-
-          return {
-            event: eventResult.success,
-            snapshot: {
-              views: reduced.views,
-              lastCommitSequence: reduced.lastCommitSequence,
-            },
-          }
-        })
+    const initial = yield* finalizeObservation(
+      restored,
+      undefined,
+      initialResult,
+    )
 
     const eventState = yield* makeEventState(
       initial.event,
@@ -549,55 +602,14 @@ export const layer = Layer.effect(
       const reducedResult = yield* reconcile(current, trigger).pipe(
         Effect.result,
       )
-      if (Result.isFailure(reducedResult)) {
-        if (reducedResult.failure instanceof SessionSourceError) {
-          yield* eventState.publish(sourceErrorEvent(reducedResult.failure))
-          return
-        }
-        yield* eventState.publish(sourceUnavailableEvent("source-incompatible"))
-        return
+      const finalized = yield* finalizeObservation(
+        current,
+        currentEvent,
+        reducedResult,
+      )
+      if (finalized.publish) {
+        yield* eventState.publish(finalized.event, finalized.snapshot)
       }
-
-      const reduced = reducedResult.success
-      if (reduced.changedViews.length === 0) {
-        if (currentEvent._tag === "SessionUnavailable") {
-          const eventResult = yield* ensurePublishableEvent(
-            snapshotEvent(reduced.views),
-          ).pipe(Effect.result)
-          yield* eventState.publish(
-            Result.isFailure(eventResult)
-              ? overviewUnavailableEvent()
-              : eventResult.success,
-            current,
-          )
-        }
-        return
-      }
-
-      const eventResult = yield* (
-        currentEvent._tag === "SessionUnavailable"
-          ? ensurePublishableEvent(snapshotEvent(reduced.views))
-          : selectPublishableEvent(reduced)
-      ).pipe(Effect.result)
-      if (Result.isFailure(eventResult)) {
-        yield* eventState.publish(overviewUnavailableEvent())
-        return
-      }
-
-      const nextSnapshot: SessionStorageSnapshot = {
-        views: reduced.views,
-        lastCommitSequence: reduced.lastCommitSequence,
-      }
-      yield* storage
-        .commit(current.lastCommitSequence, reduced.changedViews)
-        .pipe(
-          Effect.matchEffect({
-            onFailure: () =>
-              eventState.publish(storageUnavailableEvent()),
-            onSuccess: () =>
-              eventState.publish(eventResult.success, nextSnapshot),
-          }),
-        )
     })
 
     const refresh = Effect.fn("SessionSurface.refresh")(() =>

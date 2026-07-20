@@ -54,7 +54,7 @@ observed.
   byte-for-byte in a second, commits exact loss as N+1 and same-fact recovery
   as N+2, renders every frame through the production CLI client, and reconnects
   to one current snapshot without replay. A separate two-session test proves
-  only the lost identity changes. The deterministic suite passes 22 files, 155
+  only the lost identity changes. The deterministic suite passes 22 files, 156
   tests, and one intentional host-policy skip; typecheck, lint, build, and diff
   checks pass.
   The opt-in installed-Codex test also passes against this machine's real
@@ -77,4 +77,13 @@ observed.
   `source-unsupported` metadata across reconnect. Recovery of the last
   supported fact commits once and repeated reconnect is a no-op. Full
   verification passes 155 tests plus one intentional skip, and the
+  installed-Codex test remains green; another wholly fresh review is required.
+- 2026-07-20: The third fresh generic review reported one Standards smell and
+  one Specification blocker. Both are fixed. Startup and runtime observations
+  now share one encode-before-commit, commit-before-publication finalizer. A
+  successful exhaustive discovery that omits a restored exact identity commits
+  that row once as retained `source-unavailable` metadata instead of leaving it
+  fresh. A restart/IPC/one-shot text test proves the missing and present rows
+  remain visible with different provenance, and repeated reconnect is a no-op.
+  Full verification passes 156 tests plus one intentional skip, and the
   installed-Codex test remains green; another wholly fresh review is required.

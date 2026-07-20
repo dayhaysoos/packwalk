@@ -21,6 +21,10 @@ import {
   type ClientPort,
 } from "../src/client/session-client.js"
 import {
+  runOneShotSessionClient,
+  type OneShotClientPort,
+} from "../src/client/one-shot-session-client.js"
+import {
   CodexPersistedFact,
   encodeSessionProtocolEvent,
   MaximumSessionEventBytes,
@@ -132,7 +136,7 @@ it.effect("publishes one committed discovered snapshot and one committed polling
   }),
 )
 
-it.effect("adds a discovered identity without replacing a restored exact session", () =>
+it.effect("adds a discovered identity while retaining an unavailable restored session", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
     const replacementSessionId =
@@ -171,8 +175,14 @@ it.effect("adds a discovered identity without replacing a restored exact session
           sessionId,
           projectIdentity: "restored-project",
           state: { _tag: "Polled" },
+          freshness: "stale",
+          provenance: {
+            _tag: "Retained",
+            reason: "source-unavailable",
+          },
           sourceUpdatedAtMs: 9_000,
-          commitSequence: 7,
+          observedAtMs: 1_000,
+          commitSequence: 9,
         },
         {
           sessionId: replacementSessionId,
@@ -184,6 +194,91 @@ it.effect("adds a discovered identity without replacing a restored exact session
         },
       ],
     })
+  }),
+)
+
+it.effect("one-shot CLI retains a restored session omitted by discovery", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const omittedSessionId = sessionId
+    const presentSessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+    const packWalk = yield* makeRestartableDeterministicPackWalk([
+      {
+        version: 1,
+        sessionId: omittedSessionId,
+        projectIdentity: "omitted-project",
+        sourceUpdatedAtMs: 1_000,
+      },
+      {
+        version: 1,
+        sessionId: presentSessionId,
+        projectIdentity: "present-project",
+        sourceUpdatedAtMs: 1_500,
+      },
+    ])
+
+    const firstScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    yield* packWalk.startDaemonIn(firstScope)
+    yield* Scope.close(firstScope, Exit.void)
+
+    yield* packWalk.persistSourceFactForTest({
+      version: 1,
+      sessionId: presentSessionId,
+      projectIdentity: "present-project",
+      sourceUpdatedAtMs: 1_500,
+    })
+    const secondScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
+    yield* packWalk.startDaemonIn(secondScope)
+
+    const events = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+    const documents = yield* Ref.make<ReadonlyArray<string>>([])
+    const client: OneShotClientPort = {
+      writeDocument: (document) =>
+        Ref.update(documents, (written) => [...written, document]),
+    }
+    yield* runOneShotSessionClient(
+      packWalk.events.pipe(
+        Stream.tap((event) =>
+          Ref.update(events, (observed) => [...observed, event]),
+        ),
+      ),
+      client,
+      { format: "text", lineSeparator: "\n" },
+    )
+
+    expect(yield* Ref.get(events)).toEqual([{
+      _tag: "SessionsSnapshot",
+      protocolVersion: 3,
+      views: [
+        expect.objectContaining({
+          sessionId: omittedSessionId,
+          freshness: "stale",
+          provenance: {
+            _tag: "Retained",
+            reason: "source-unavailable",
+          },
+          sourceUpdatedAtMs: 1_000,
+          observedAtMs: 2_000,
+          commitSequence: 3,
+        }),
+        expect.objectContaining({
+          sessionId: presentSessionId,
+          freshness: "fresh",
+          provenance: { _tag: "Observed" },
+          commitSequence: 2,
+        }),
+      ],
+    }])
+    const rendered = (yield* Ref.get(documents))[0] ?? ""
+    expect(rendered).toContain(omittedSessionId)
+    expect(rendered).toContain(presentSessionId)
+    expect(rendered).toContain("stale")
+    expect(rendered).toContain("RETAINED (source-unavailable)")
+    expect(rendered).toContain("fresh")
+    expect(rendered).toContain("OBSERVED")
+    yield* Scope.close(secondScope, Exit.void)
   }),
 )
 
