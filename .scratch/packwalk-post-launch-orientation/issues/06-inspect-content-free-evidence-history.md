@@ -55,7 +55,7 @@ explains each session status without becoming a second transcript archive.
   laws, and compiled text/JSON commands over real local IPC. The opt-in test
   also crossed an installed Codex persisted update through storage, daemon
   publication, IPC, and public history inspection without changing Codex.
-  `npm run verify` passes 26 files, 172 tests, and one intentional host-policy
+  `npm run verify` passes 26 files, 173 tests, and one intentional host-policy
   skip plus typecheck, lint, and the production build.
 - 2026-07-20: A cold real-product command exposed that the former five-second
   client reconnect budget could expire while the new v4 daemon completed its
@@ -76,3 +76,13 @@ explains each session status without becoming a second transcript archive.
   five findings are corrected. The focused four-file suite passes 21 tests,
   and `npm run verify` passes 26 files, 172 tests, and one intentional skip plus
   typecheck, lint, and build. A wholly fresh generic review remains.
+- 2026-07-20: Fresh generic review pass 2 is clean on Specification and found
+  one Standards truthfulness gap: retry spacing alone did not bound total
+  elapsed startup because each IPC attempt has its own open timeout. A red
+  virtual-clock regression proved the command could remain pending at the
+  claimed deadline. `connectOrStart` now wraps the initial attempt, daemon
+  start, retry delays, and connection attempts in one explicit elapsed
+  deadline; both CLI paths supply thirty seconds. The focused deadline suite
+  passes three tests, and `npm run verify` passes 26 files, 173 tests, and one
+  intentional skip plus typecheck, lint, and build. Another wholly fresh
+  generic review remains.

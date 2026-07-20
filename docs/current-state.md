@@ -716,7 +716,7 @@ repeat inspection, prohibited content, and injected Windows/macOS/Linux
 encoding and path behavior. Compiled text and JSON inspection crossed real
 local IPC, and the opt-in installed-Codex check crossed a real persisted update
 through storage, publication, IPC, and public history inspection without
-changing Codex. `npm run verify` passes 26 files, 172 tests, and one intentional
+changing Codex. `npm run verify` passes 26 files, 173 tests, and one intentional
 host-policy skip plus typecheck, lint, and the production build.
 
 A cold real-product run also exposed that the former five-second reconnect
@@ -743,6 +743,17 @@ extension; and the active integration SHA above now names resolved Ticket 05.
 All five findings are corrected. The focused four-file suite passes 21 tests,
 and full verification passes 26 files, 172 tests, and one intentional skip plus
 typecheck, lint, and build. A wholly fresh generic review remains.
+
+Fresh generic review pass 2 reports zero Specification findings and one
+Standards truthfulness gap: retry spacing alone did not bound total elapsed
+startup because each IPC attempt has its own open timeout. A red virtual-clock
+regression proved the command could remain pending at the claimed deadline.
+`connectOrStart` now places the initial attempt, daemon start, retry delays, and
+connection attempts under one explicit elapsed deadline; overview and history
+commands both supply thirty seconds. The focused deadline suite passes three
+tests, and full verification passes 26 files, 173 tests, and one intentional
+skip plus typecheck, lint, and build. Another wholly fresh generic review
+remains.
 
 ## Reproduce
 

@@ -31,6 +31,10 @@ import { runOneShotSessionClient } from "./client/one-shot-session-client.js"
 import { runSessionClient } from "./client/session-client.js"
 import { runSessionHistoryClient } from "./client/session-history-client.js"
 
+const daemonRetryDelay = "100 millis" as const
+const daemonRetryAttempts = 300
+const daemonStartupDeadline = "30 seconds" as const
+
 const cliProgram = Effect.scoped(
   Effect.gen(function* () {
     const stdio = yield* Stdio.Stdio
@@ -41,8 +45,9 @@ const cliProgram = Effect.scoped(
     const connectEvents = connectOrStart({
       connect: connectSessionEvents(paths.ipcEndpoint),
       startDaemon: startPackWalkDaemon,
-      retryDelay: "100 millis",
-      retryAttempts: 300,
+      retryDelay: daemonRetryDelay,
+      retryAttempts: daemonRetryAttempts,
+      startupDeadline: daemonStartupDeadline,
     })
     yield* CliCommand.$match(command, {
       Refresh: () =>
@@ -70,8 +75,9 @@ const cliProgram = Effect.scoped(
         connectOrStart({
           connect: inspectSessionHistory(paths.ipcEndpoint, sessionId),
           startDaemon: startPackWalkDaemon,
-          retryDelay: "100 millis",
-          retryAttempts: 300,
+          retryDelay: daemonRetryDelay,
+          retryAttempts: daemonRetryAttempts,
+          startupDeadline: daemonStartupDeadline,
         }).pipe(
           Effect.flatMap((history) =>
             makeOneShotCliOutput.pipe(
