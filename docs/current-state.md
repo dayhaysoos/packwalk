@@ -127,6 +127,12 @@ one `OneShot { format }` command owns the shared text/JSON execution path. Those
 corrections are implemented. Fresh generic review pass 2 is clean with zero
 Standards and zero Specification findings. Independent product preflight is the
 remaining delivery gate; no maintainer acceptance is claimed.
+The first preflight reported `NOT READY` solely because npm lifecycle banners
+polluted stdout for the README's repository commands. The documented one-shot
+commands now use `npm run --silent packwalk -- ...`, and an isolated
+process-level regression executes those exact commands through real local IPC
+to protect clean text, parseable JSON, and invalid-usage streams. The blocker is
+fixed pending full verification, fresh generic review, and fresh preflight.
 
 ## Reproduce
 

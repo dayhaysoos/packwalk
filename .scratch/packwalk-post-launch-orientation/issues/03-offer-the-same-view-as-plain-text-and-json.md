@@ -55,3 +55,14 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   real `POLLED` snapshot. Fresh generic review pass 2 is clean with zero
   Standards and zero Specification findings. Ticket 03 now awaits independent
   product preflight; no maintainer acceptance is claimed.
+- 2026-07-20: Independent product preflight reported `NOT READY` because the
+  originally documented `npm run packwalk -- text|json` repository wrapper
+  prepended npm lifecycle lines to stdout even though the PackWalk payload
+  itself was correct. The README now uses `npm run --silent packwalk -- text`
+  and `npm run --silent packwalk -- json`. A new isolated process-level
+  regression starts a real local IPC server, executes those exact documented
+  commands with redirected output, and proves six clean text lines, one
+  directly parseable schema-shaped JSON document, native final line endings,
+  empty stderr, exit 0, and fixed invalid-usage stdout/stderr/exit behavior.
+  The focused regression is green; full verification, fresh generic review,
+  and a fresh product preflight remain required.

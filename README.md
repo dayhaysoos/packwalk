@@ -85,8 +85,8 @@ For one current result suitable for scrollback, screen readers, or scripts,
 use either one-shot command:
 
 ```sh
-npm run packwalk -- text
-npm run packwalk -- json
+npm run --silent packwalk -- text
+npm run --silent packwalk -- json
 ```
 
 `text` emits the same complete six-line fields without terminal cursor
