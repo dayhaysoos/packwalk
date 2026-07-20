@@ -47,16 +47,16 @@ path is separately qualified.
 - Shell-resolved standalone Codex `codex-cli 0.139.0`, binary SHA-256
   `c6ede9ef9b672ef5a99384e507bec5476cbb60934c03f19cbd0355d9fdd83915`.
 - macOS `26.5.2` build `25F84`, Darwin `25.5.0`, arm64.
-- A separate Codex desktop app-server was `0.145.0-alpha.18`; it was not treated
-  as the standalone TUI release under qualification.
 
 ### Tested mechanism and evidence
 
 Current experimental TypeScript and JSON app-server schemas were generated in
-a disposable directory and removed after inspection. They prove that one
-app-server connection can emit notifications with exact `threadId`, `turnId`,
-and item identity. They do not expose a request that attaches or subscribes to
-another process's independently started ordinary TUI:
+a disposable directory and removed after inspection. They define notifications
+with exact `threadId`, `turnId`, and item identity and describe notification
+filtering for the current connection. A schema defines a protocol shape; it
+does not prove that an independently started TUI emits that notification to an
+external observer. The request union exposes no operation that attaches or
+subscribes to another process's ordinary TUI:
 
 - `thread/status/changed`, `turn/started`, and `item/started` carry exact
   structural identifiers;
@@ -66,20 +66,21 @@ another process's independently started ordinary TUI:
 - `thread/resume` loads from disk or rejoins a thread already running inside
   that app-server, so it is not a connection-only attachment to another TUI.
 
-The standalone binary identifies separate in-process and remote clients. The
-ordinary TUI starts an embedded `InProcessAppServerClient` and forwards its
-events internally. The connectable alternatives are a TUI launched with
-`--remote`, a separately listening app-server, or a managed app-server daemon
-and proxy. Each changes the accepted launch topology or owns separate in-memory
-session state and therefore cannot satisfy this ticket after the ordinary TUI
-has already started.
+The standalone binary contains symbol names for separate in-process and remote
+app-server clients and internal event forwarding. Symbol presence does not
+prove which client a default TUI starts or how its events are wired at runtime.
+CLI help documents connectable alternatives—a TUI launched with `--remote`, a
+separately listening app-server, or a managed app-server daemon and proxy—but
+those are launch-time or separately owned topologies rather than demonstrated
+post-launch attachment.
 
 A bounded runtime-topology check found no terminal-attached Codex process on
-this machine. The desktop app-server used inherited unnamed socket pairs and
-exposed no TCP listener or named Unix endpoint attributable to an ordinary
-TUI. Codex's SQLite index maps exact thread identity to a persisted rollout
-path but contains no PID, terminal, socket, port, endpoint, or event-stream
-handle. No private desktop IPC endpoint was probed.
+this machine, so no ordinary-TUI listener, runtime wiring, or endpoint-to-session
+correlation was observed. A structural column-name query showed that Codex's
+SQLite index maps exact thread identity to a persisted rollout path but has no
+dedicated PID, terminal, socket, port, endpoint, or event-stream column. That
+absence does not prove that another supported correlation source cannot exist.
+No private desktop IPC endpoint was probed.
 
 ### Current conclusion
 
@@ -125,7 +126,15 @@ schema_dir=$(mktemp -d /tmp/packwalk-ticket02-codex-schema.XXXXXX)
 mkdir "$schema_dir/ts" "$schema_dir/json"
 codex app-server generate-ts --experimental --out "$schema_dir/ts"
 codex app-server generate-json-schema --experimental --out "$schema_dir/json"
-rg -n 'thread/(attach|subscribe|resume|loaded/list|unsubscribe)' "$schema_dir"
+rg -n 'thread/(attach|subscribe|resume|loaded/list|unsubscribe)' \
+  "$schema_dir/ts/ClientRequest.ts"
+rg -n 'threadId|turnId' \
+  "$schema_dir/ts/v2/ThreadStatusChangedNotification.ts" \
+  "$schema_dir/ts/v2/TurnStartedNotification.ts" \
+  "$schema_dir/ts/v2/ItemStartedNotification.ts"
+nl -ba "$schema_dir/ts/InitializeCapabilities.ts"
+nl -ba "$schema_dir/ts/v2/ThreadLoadedListResponse.ts"
+nl -ba "$schema_dir/ts/v2/ThreadResumeParams.ts"
 find "$schema_dir" -depth -delete
 
 codex_binary=$(readlink "$(command -v codex)")
@@ -142,6 +151,13 @@ lsof -nP -a -p 12345 -d 0,1,2
 
 node -e 'const { DatabaseSync }=require("node:sqlite"); const db=new DatabaseSync(process.env.HOME+"/.codex/state_5.sqlite",{readOnly:true}); db.exec("PRAGMA query_only=ON"); console.log(db.prepare("SELECT name,type FROM pragma_table_info(?) ORDER BY cid").all("threads")); db.close()'
 ```
+
+If the default TUI snapshot reveals a named endpoint, do not infer session
+identity from process ownership, working directory, or timing. Proceed only if
+the installed release documents a read-only handshake that returns the exact
+Codex session identity without resume or lifecycle change. No such handshake
+appears in the inspected `0.139.0` request schemas, so absent new supported
+evidence the correlation result remains unavailable and no connection is made.
 
 The topology commands are read-only but their raw output can contain private
 local paths, terminal names, process identifiers, file descriptors, or socket
@@ -178,3 +194,7 @@ qualification. This macOS result makes no claim about either platform.
   evidence as a runtime conclusion, remove an undefined extra status label,
   and document a reproducible, allowlisted topology check. Those
   documentation findings are corrected without changing product behavior.
+- 2026-07-20: A fresh Standards pass required two further corrections: schema
+  and symbol presence no longer claim runtime wiring, and the pending snapshot
+  no longer assumes an endpoint can be correlated without a documented exact-ID
+  handshake. Current-state wording now calls this a pending-evidence report.

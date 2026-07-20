@@ -151,8 +151,8 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Review and preflight the bounded Ticket 02 negative report, isolating its
-   one remaining ordinary-TUI topology check.
+1. Review and preflight the bounded Ticket 02 pending-evidence report,
+   isolating its one remaining ordinary-TUI topology check.
 2. Continue with Tickets 03–10 in dependency order while that non-blocking
    human evidence remains open, including a
    separate readability slice after the multi-session shape exists.
