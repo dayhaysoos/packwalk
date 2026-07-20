@@ -690,10 +690,10 @@ contention handling, native three-platform qualification, live attachment,
 intervention, and routing remain outside Ticket 05.
 
 [Ticket 06](../.scratch/packwalk-post-launch-orientation/issues/06-inspect-content-free-evidence-history.md)
-is claimed on `agent/ticket-06-content-free-history` from fixed integration
-point `0816410ea854b3a829ac49ee62826b58cc4174c4`. Implementation is complete
-while the ticket remains claimed for fresh generic review and independent
-product preflight.
+is resolved on `agent/ticket-06-content-free-history` from fixed integration
+point `0816410ea854b3a829ac49ee62826b58cc4174c4`. It has a clean whole-branch
+generic review and a `READY FOR MAINTAINER` independent product preflight;
+maintainer acceptance has not been claimed.
 
 Protocol v4 adds an exact-session, read-only history query through the daemon,
 IPC, and `packwalk inspect <exact-session-id> [text|json]`. The client follows
@@ -782,7 +782,25 @@ Another wholly fresh generic review remains.
 Fresh generic review pass 5 inspected the complete fixed-base diff at
 `3979e32d3879ddf36ae933ca6481326ca9475e2b`. Both Standards and
 Specification report zero actionable findings. No generic review blocker
-remains; independent product preflight is the remaining agent gate.
+remains.
+
+Independent product preflight at `9c48c5b` reports `READY FOR MAINTAINER` with
+no acceptance blocker. It reran full verification, crossed compiled text and
+JSON inspection through real daemon/IPC, assembled 457 exact-session facts
+over consecutive fixed 32-fact pages, proved case-sensitive targeting and
+byte-identical repeat inspection, and passed the opt-in installed-Codex
+persisted-update check. Native execution was macOS arm64; deterministic
+Windows/Linux laws remain covered and native qualification remains Ticket 10.
+
+The final stale-process limitation was then exhausted. Only the PackWalk-owned
+v4 daemon was refreshed from PID 57785 to candidate PID 27326; legacy
+protocol-v1 PID 77857 remained alive and untouched. The current compiled CLI
+assembled 488 retained facts through commit 2675, and a valid-schema
+continuation with a nonexistent exact-session anchor returned
+`invalid-history-cursor` through real local IPC. The ticket is resolved without
+claiming maintainer acceptance. Its only remaining human step is the shortest
+text/JSON inspection and a subjective judgment that the history is
+understandable and useful in the maintainer's real terminal.
 
 ## Reproduce
 
@@ -834,8 +852,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Complete Ticket 06's fresh review and preflight loops, then continue Tickets
-   08, 09, 07, the separate readability slice, and Ticket 10 in delivery order.
+2. Continue Tickets 08, 09, 07, the separate readability slice, and Ticket 10
+   in delivery order.
 
 ## Fresh-agent comprehension check
 
@@ -854,9 +872,9 @@ following without inspecting old commits or another checkout:
 6. Ticket 01 is maintainer-accepted and resolved; the remaining local product
    continues through the polling, intervention-qualification, and routing
    phases without reopening its polling result.
-7. Tickets 04 and 05 are resolved and integrated: exact identities remain
-   distinct and restoration or degradation is explicit. Ticket 06 now owns
-   content-free evidence history and exact-session inspection.
+7. Tickets 04, 05, and 06 are resolved: exact identities remain distinct,
+   restoration or degradation is explicit, and content-free evidence history
+   is inspectable for one exact session.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote

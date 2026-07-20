@@ -1,6 +1,6 @@
 # Inspect content-free evidence history
 
-Status: claimed
+Status: resolved
 Blocked by: 05
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -111,3 +111,20 @@ explains each session status without becoming a second transcript archive.
   diff at `3979e32d3879ddf36ae933ca6481326ca9475e2b`. Both Standards and
   Specification report zero actionable findings. No generic review blocker
   remains; independent product preflight is the remaining agent gate.
+- 2026-07-20: Independent product preflight at `9c48c5b` reports `READY FOR
+  MAINTAINER` with no acceptance blocker. It reran full verification, crossed
+  compiled text and JSON inspection through real daemon/IPC, assembled 457
+  exact-session facts over consecutive fixed 32-fact pages, proved
+  case-sensitive targeting and byte-identical repeat inspection, and passed
+  the opt-in installed-Codex persisted-update check. Native execution was
+  macOS arm64; deterministic Windows/Linux laws remain covered and native
+  qualification remains Ticket 10.
+- 2026-07-20: The final stale-process limitation was exhausted after preflight.
+  Only the PackWalk-owned v4 daemon was refreshed from PID 57785 to candidate
+  PID 27326; legacy protocol-v1 PID 77857 remained alive and untouched. The
+  current compiled CLI assembled 488 retained facts through commit 2675, and a
+  valid-schema continuation with a nonexistent exact-session anchor returned
+  `invalid-history-cursor` through real local IPC. Ticket 06 is resolved
+  without claiming maintainer acceptance. The only remaining human step is
+  the shortest text/JSON inspection and a subjective judgment that the history
+  is understandable and useful in the maintainer's terminal.

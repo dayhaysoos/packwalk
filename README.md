@@ -13,9 +13,11 @@ polling for one ordinary Codex session. The current integration candidate
 extends that slice across supported sessions, persists a content-free
 multi-session overview and structural evidence history, exposes both through
 the PackWalk daemon, and displays polling updates in a plain command-line view
-without mixing exact identities. Ticket 06's history extension remains pending
-its review and product-preflight gates. PackWalk does not yet establish
-trustworthy live attachment or perform a consequential action.
+without mixing exact identities. Ticket 06's history extension is resolved on
+its delivery branch with a clean generic review and a `READY FOR MAINTAINER`
+independent product preflight; integration is the remaining repository step.
+PackWalk does not yet establish trustworthy live attachment or perform a
+consequential action.
 
 Read-only behavior is the current delivery state, not PackWalk's permanent
 product boundary. The intended local product progresses from truthful
@@ -185,9 +187,10 @@ session and redrew a later committed source timestamp in place. Ticket 04's
 multi-session shape is resolved and integrated. Ticket 05's durable restoration
 and retained-evidence implementation is resolved with a clean final generic
 review and a `READY FOR MAINTAINER` independent product preflight. Ticket 06's
-content-free history implementation is complete and remains claimed for its
-fresh generic review and independent product preflight. The view still has
-non-blocking visual-hierarchy feedback for a separate readability slice. See
+content-free history implementation is resolved with the same clean review and
+preflight verdict; maintainer acceptance has not been claimed. The view still
+has non-blocking visual-hierarchy feedback for a separate readability slice.
+See
 [current state](docs/current-state.md), [Ticket
 01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md),
 and [Ticket
