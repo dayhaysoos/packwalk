@@ -45,9 +45,11 @@ client.
 ## Active acceptance issue
 
 [Ticket 01](../.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
-is reopened for agent work. The deterministic suite and an earlier integration
-check passed, but the maintainer subsequently reported that continuing Codex
-activity did not visibly update the running table.
+is in final agent review on `agent/ticket-01-acceptance`. The maintainer's
+failed demonstration was reproduced: a persistent daemon could remain pinned
+to an older singleton, and a cold restart then rejected a newly discovered
+identity. Separately, second-only CLI timestamps could render distinct
+subsecond polling commits identically.
 
 Polling is not trustworthy live observation and should not be described as
 real-time attachment. It must nevertheless publish and visibly render a new
@@ -55,11 +57,15 @@ committed frame after the supported Codex persisted source changes. The report
 must be diagnosed through the source, daemon publication, IPC stream, and CLI
 redraw seams before personal acceptance can be restored.
 
-The compact table also currently shows project, state, activity, and updated
-time while deliberately omitting exact session identity, evidence source, and
-freshness. Those fields exist in the public `SessionView`, but the accepted
-runnable demonstration requires them to be visible. That presentation gap is
-part of the reopened Ticket 01 acceptance rather than a later enhancement.
+The branch now refreshes the existing one-session discovery when a CLI
+subscribes, replaces only that singleton when supported discovery identifies a
+different session, and preserves monotonic PackWalk commit order. It does not
+enumerate, display, or poll multiple sessions concurrently. The compact
+six-line table now shows project, exact session identity, activity, evidence
+source, freshness, millisecond source-update time, observation time, and honest
+state. Deterministic verification and a real cold-start-plus-reconnect exercise
+are green; generic code review and independent product preflight remain before
+the issue can move to maintainer-only acceptance.
 
 ## Reproduce
 
@@ -70,9 +76,14 @@ npm ci
 npm run packwalk
 ```
 
-Start an ordinary Codex TUI before `npm run packwalk`. Continue work in that
-Codex session and observe whether PackWalk changes after Codex persists the
-supported activity evidence.
+Start an ordinary Codex TUI and complete one turn before `npm run packwalk`.
+Confirm the displayed project and exact session identity, note `SOURCE UPDATED`,
+then complete another turn in that same Codex session. After Codex persists the
+activity and polling observes it, PackWalk must keep the same `SESSION`, show
+`POLLED`, and render a later `SOURCE UPDATED` value. A capable terminal with
+enough width refreshes the same six lines; narrow, non-TTY, or cursor-disabled
+output appends another complete plain-text table. Neither path is live or
+real-time observation.
 
 Run the complete deterministic verification with:
 
@@ -103,8 +114,8 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Restore all required session fields to the human view and diagnose Ticket
-   01's visible polling-update acceptance.
+1. Complete fresh generic code review and independent product preflight for
+   Ticket 01, fixing and re-reviewing every blocker.
 2. Have the maintainer personally rerun the repository command.
 3. Only after Ticket 01 resolves, begin the bounded Ticket 02 live-event
    experiment.
@@ -123,8 +134,9 @@ following without inspecting old commits or another checkout:
    session lifecycle or start idle work.
 5. Remote web, mobile, and cross-device supervision is a bonus horizon after
    the successful local core, not a current blocker.
-6. Ticket 01 is active because the required visible fields and real persisted
-   polling refresh are not yet personally accepted.
+6. Ticket 01's agent-verifiable implementation is complete on its acceptance
+   branch, but required review gates and the maintainer's personal real-product
+   observation remain before resolution.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote

@@ -8,9 +8,13 @@ import { tmpdir } from "node:os"
 import { join, sep } from "node:path"
 
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Stream } from "effect"
+import { Deferred, Effect, Fiber, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
+import {
+  runSessionClient,
+  type ClientPort,
+} from "../src/client/session-client.js"
 import { makeCodexIndexedPackWalk } from "./support/codex-indexed-packwalk.js"
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
@@ -122,6 +126,101 @@ it.effect("discovers and polls one content-free session from the Codex SQLite th
       },
     })
     expect(JSON.stringify(events)).not.toContain(forbidden)
+  }),
+)
+
+it.effect("renders one later persisted Codex update as a complete CLI frame through real IPC", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const packWalk = yield* makeCodexIndexedPackWalk({
+      sessionId,
+      projectIdentity: "fixture-project",
+      sourceUpdatedAtMs: 1_000,
+      forbiddenContent: "must-not-appear",
+    })
+    const frames = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
+    const firstRendered = yield* Deferred.make<void>()
+    const client: ClientPort = {
+      writeFrame: (lines) =>
+        Ref.updateAndGet(frames, (rendered) => [...rendered, lines]).pipe(
+          Effect.flatMap((rendered) =>
+            rendered.length === 1
+              ? Deferred.succeed(firstRendered, undefined)
+              : Effect.void,
+          ),
+        ),
+    }
+    const rendering = yield* runSessionClient(
+      packWalk.events.pipe(Stream.take(2)),
+      client,
+    ).pipe(Effect.forkChild)
+
+    yield* Deferred.await(firstRendered)
+    yield* packWalk.persistCodexActivity(2_500)
+    yield* TestClock.adjust("1 second")
+    yield* Fiber.join(rendering)
+
+    const rendered = yield* Ref.get(frames)
+    expect(rendered).toHaveLength(2)
+    const initial = rendered[0]?.join("\n") ?? ""
+    const updated = rendered[1]?.join("\n") ?? ""
+    for (const frame of [initial, updated]) {
+      expect(frame).toContain("fixture-project")
+      expect(frame).toContain(sessionId)
+      expect(frame).toContain("persisted Codex activity")
+      expect(frame).toContain("codex-sqlite-thread-index")
+      expect(frame).toContain("fresh")
+    }
+    expect(initial).toContain("DISCOVERED")
+    expect(initial).toContain("1970-01-01T00:00:01.000Z")
+    expect(initial).toContain("1970-01-01T00:00:02.000Z")
+    expect(updated).toContain("POLLED")
+    expect(updated).toContain("1970-01-01T00:00:02.500Z")
+    expect(updated).toContain("1970-01-01T00:00:03.000Z")
+    expect(updated).not.toBe(initial)
+  }),
+)
+
+it.effect("refreshes the one current session when a later CLI subscribes", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const replacementSessionId =
+      "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+    const packWalk = yield* makeCodexIndexedPackWalk({
+      sessionId,
+      projectIdentity: "first-project",
+      sourceUpdatedAtMs: 1_000,
+      forbiddenContent: "must-not-appear",
+    })
+
+    const first = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(first[0]).toMatchObject({
+      _tag: "SessionSnapshot",
+      view: { sessionId, projectIdentity: "first-project" },
+    })
+
+    yield* packWalk.replaceCodexSession({
+      sessionId: replacementSessionId,
+      projectIdentity: "replacement-project",
+      sourceUpdatedAtMs: 2_500,
+    })
+
+    const reconnected = Array.from(
+      yield* packWalk.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(reconnected[0]).toMatchObject({
+      _tag: "SessionSnapshot",
+      view: {
+        sessionId: replacementSessionId,
+        projectIdentity: "replacement-project",
+        state: { _tag: "Discovered" },
+        sourceUpdatedAtMs: 2_500,
+        observedAtMs: 2_000,
+        commitSequence: 2,
+      },
+    })
   }),
 )
 

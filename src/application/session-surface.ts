@@ -8,6 +8,7 @@ import {
   Ref,
   Result,
   Schedule,
+  Semaphore,
   Stream,
 } from "effect"
 
@@ -21,6 +22,7 @@ import {
 
 export interface Interface {
   readonly events: Stream.Stream<SessionEvent>
+  readonly refresh: Effect.Effect<void>
   readonly runPolling: Effect.Effect<never, import("../domain/session.js").IllegalSessionTransition>
 }
 
@@ -112,13 +114,19 @@ export const layer = Layer.effect(
       const eventState = yield* makeEventState(unavailable)
       return Service.of({
         events: eventState.events,
+        refresh: Effect.void,
         runPolling: Effect.never,
       })
     }
 
     const initialFact = initialResult.success
     const observedAtMs = yield* Clock.currentTimeMillis
-    const initialDecision = transitionSession(restored, initialFact, observedAtMs)
+    const initialDecision = transitionSession(
+      restored,
+      initialFact,
+      observedAtMs,
+      "discovery",
+    )
 
     if (Result.isFailure(initialDecision)) {
       return yield* initialDecision.failure
@@ -142,6 +150,67 @@ export const layer = Layer.effect(
       yield* storage.commit(initialDecision.success.view)
     }
     const eventState = yield* makeEventState(initialEvent)
+    const transitionSemaphore = yield* Semaphore.make(1)
+
+    const refreshOnce = Effect.fn("SessionSurface.refreshOnce")(function* () {
+      const currentEvent = yield* eventState.currentEvent
+      if (currentEvent._tag === "SessionUnavailable") {
+        return
+      }
+
+      const factResult = yield* source.discover().pipe(Effect.result)
+      if (Result.isFailure(factResult)) {
+        yield* eventState.publish(
+          SessionEvent.cases.SessionUnavailable.make({
+            protocolVersion: 1,
+            code:
+              factResult.failure.code === "unavailable"
+                ? "source-unavailable"
+                : "source-incompatible",
+            message: "PackWalk could not read supported Codex persisted evidence",
+          }),
+        )
+        return
+      }
+
+      const now = yield* Clock.currentTimeMillis
+      const decision = transitionSession(
+        Option.some(currentEvent.view),
+        factResult.success,
+        now,
+        "discovery",
+      )
+      if (Result.isFailure(decision)) {
+        yield* eventState.publish(
+          SessionEvent.cases.SessionUnavailable.make({
+            protocolVersion: 1,
+            code: "source-incompatible",
+            message: "PackWalk could not read supported Codex persisted evidence",
+          }),
+        )
+        return
+      }
+
+      yield* matchTransition(decision.success, {
+        NoChange: () => Effect.void,
+        Changed: ({ event, view }) =>
+          storage.commit(view).pipe(
+            Effect.matchEffect({
+              onFailure: () =>
+                eventState.publish(
+                  SessionEvent.cases.SessionUnavailable.make({
+                    protocolVersion: 1,
+                    code: "storage-unavailable",
+                    message: "PackWalk could not commit its current session view",
+                  }),
+                ),
+              onSuccess: () => eventState.publish(event),
+            }),
+          ),
+      })
+    })
+
+    const refresh = transitionSemaphore.withPermit(refreshOnce())
 
     const pollOnce = Effect.fn("SessionSurface.pollOnce")(function* () {
       const currentEvent = yield* eventState.currentEvent
@@ -193,12 +262,12 @@ export const layer = Layer.effect(
       })
     })
 
-    const runPolling = pollOnce().pipe(
+    const runPolling = transitionSemaphore.withPermit(pollOnce()).pipe(
       Effect.repeat(Schedule.spaced("1 second")),
       Effect.delay("1 second"),
       Effect.andThen(Effect.never),
     )
 
-    return Service.of({ events: eventState.events, runPolling })
+    return Service.of({ events: eventState.events, refresh, runPolling })
   }),
 )

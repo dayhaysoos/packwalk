@@ -132,6 +132,7 @@ export const makeSessionEventServer = (
 const serveClient = (
   socket: import("effect/unstable/socket/Socket").Socket,
   events: Stream.Stream<SessionEventValue>,
+  refresh: Effect.Effect<void>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -181,6 +182,7 @@ const serveClient = (
         ),
       )
       yield* Effect.raceFirst(Deferred.await(command), readerStopped)
+      yield* refresh
 
       yield* events.pipe(
         Stream.runForEach((event) =>
@@ -210,10 +212,11 @@ const serveClient = (
 export const runSessionEventServer = (
   server: SessionEventServer,
   events: Stream.Stream<SessionEventValue>,
+  refresh: Effect.Effect<void> = Effect.void,
 ): Effect.Effect<never, LocalIpcError> =>
   server
     .run((socket) =>
-      serveClient(socket, events).pipe(
+      serveClient(socket, events, refresh).pipe(
         Effect.catch(() => Effect.void),
       ),
     )

@@ -90,3 +90,38 @@ export const updateCodexIndexFixture = Effect.fn("CodexIndexFixture.update")(
     })
   },
 )
+
+export const replaceCodexIndexFixture = Effect.fn("CodexIndexFixture.replace")(
+  function* (
+    path: string,
+    currentSessionId: string,
+    replacement: Omit<CodexIndexFixture, "forbiddenContent">,
+  ) {
+    yield* Effect.try({
+      try: () => {
+        const database = new DatabaseSync(path, {
+          allowExtension: false,
+          defensive: true,
+          readBigInts: false,
+        })
+        try {
+          database
+            .prepare(`
+              UPDATE threads
+              SET id = ?, cwd = ?, updated_at_ms = ?
+              WHERE id = ?
+            `)
+            .run(
+              replacement.sessionId,
+              replacement.projectIdentity,
+              replacement.sourceUpdatedAtMs,
+              currentSessionId,
+            )
+        } finally {
+          database.close()
+        }
+      },
+      catch: fixtureError,
+    })
+  },
+)

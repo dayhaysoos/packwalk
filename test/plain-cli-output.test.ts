@@ -1,7 +1,49 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Ref, Sink, Stdio } from "effect"
+import { Effect, Ref, Sink, Stdio, Stream } from "effect"
 
 import { makePlainCliOutputWith } from "../src/client/plain-cli-output.js"
+import { runSessionClient } from "../src/client/session-client.js"
+import {
+  ProjectIdentity,
+  SessionEvent,
+  SessionIdentity,
+  SessionState,
+  SessionView,
+} from "../src/domain/session.js"
+
+const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
+
+const sessionEvents = () => {
+  const discovered = SessionView.make({
+    protocolVersion: 1,
+    sessionId: SessionIdentity.make(sessionId),
+    projectIdentity: ProjectIdentity.make("fixture-project"),
+    activity: "persisted Codex activity",
+    evidenceSource: "codex-sqlite-thread-index",
+    state: SessionState.cases.Discovered.make({}),
+    freshness: "fresh",
+    sourceUpdatedAtMs: 1_000,
+    observedAtMs: 2_000,
+    commitSequence: 1,
+  })
+
+  return Stream.make(
+    SessionEvent.cases.SessionSnapshot.make({
+      protocolVersion: 1,
+      view: discovered,
+    }),
+    SessionEvent.cases.SessionUpdated.make({
+      protocolVersion: 1,
+      view: SessionView.make({
+        ...discovered,
+        state: SessionState.cases.Polled.make({}),
+        sourceUpdatedAtMs: 2_500,
+        observedAtMs: 3_000,
+        commitSequence: 2,
+      }),
+    }),
+  )
+}
 
 it.effect("appends plain frames without terminal controls on non-TTY output", () =>
   Effect.gen(function* () {
@@ -82,6 +124,66 @@ it.effect("redraws a later terminal frame in place", () =>
       "PackWalk\nfirst row\n" +
         "\u001B[2A\r\u001B[2KPackWalk\n\r\u001B[2Ksecond row\n",
     )
+  }),
+)
+
+it.effect("redraws complete session frames on an 80-column terminal", () =>
+  Effect.gen(function* () {
+    const bytes = yield* Ref.make("")
+    const output = yield* makePlainCliOutputWith({
+      isTerminal: true,
+      supportsCursorMovement: true,
+      columns: () => 80,
+    }).pipe(
+      Effect.provide(
+        Stdio.layerTest({
+          stdout: () =>
+            Sink.forEach((chunk: string | Uint8Array) =>
+              Ref.update(bytes, (current) => `${current}${String(chunk)}`),
+            ),
+        }),
+      ),
+    )
+
+    yield* runSessionClient(sessionEvents(), output)
+
+    const rendered = yield* Ref.get(bytes)
+    expect(rendered).toContain("\u001B[6A")
+    expect(rendered.split("\r\u001B[2K")).toHaveLength(7)
+    expect(rendered.match(new RegExp(sessionId, "gu"))).toHaveLength(2)
+    expect(rendered).toContain("codex-sqlite-thread-index")
+    expect(rendered).toContain("1970-01-01T00:00:01.000Z")
+    expect(rendered).toContain("1970-01-01T00:00:02.500Z")
+    expect(rendered).toContain("1970-01-01T00:00:03.000Z")
+  }),
+)
+
+it.effect("appends complete session frames when the terminal is too narrow", () =>
+  Effect.gen(function* () {
+    const bytes = yield* Ref.make("")
+    const output = yield* makePlainCliOutputWith({
+      isTerminal: true,
+      supportsCursorMovement: true,
+      columns: () => 60,
+    }).pipe(
+      Effect.provide(
+        Stdio.layerTest({
+          stdout: () =>
+            Sink.forEach((chunk: string | Uint8Array) =>
+              Ref.update(bytes, (current) => `${current}${String(chunk)}`),
+            ),
+        }),
+      ),
+    )
+
+    yield* runSessionClient(sessionEvents(), output)
+
+    const rendered = yield* Ref.get(bytes)
+    expect(rendered).not.toContain("\u001B")
+    expect(rendered.match(/SOURCE UPDATED/gu)).toHaveLength(2)
+    expect(rendered.match(new RegExp(sessionId, "gu"))).toHaveLength(2)
+    expect(rendered).toContain("DISCOVERED")
+    expect(rendered).toContain("POLLED")
   }),
 )
 

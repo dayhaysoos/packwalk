@@ -115,6 +115,8 @@ export class IllegalSessionTransition extends Schema.TaggedErrorClass<IllegalSes
   },
 ) {}
 
+export type SessionTransitionSource = "discovery" | "poll"
+
 type TransitionDecision = Data.TaggedEnum<{
   NoChange: {}
   Changed: {
@@ -129,6 +131,7 @@ export const transitionSession = (
   current: Option.Option<SessionView>,
   fact: CodexPersistedFact,
   observedAtMs: number,
+  source: SessionTransitionSource = "poll",
 ): Result.Result<TransitionDecision, IllegalSessionTransition> => {
   if (Option.isNone(current)) {
     const view = SessionView.make({
@@ -152,8 +155,36 @@ export const transitionSession = (
     )
   }
 
-  if (current.value.sessionId !== fact.sessionId) {
+  if (
+    current.value.sessionId !== fact.sessionId &&
+    source === "poll"
+  ) {
     return Result.fail(new IllegalSessionTransition({ reason: "session-identity-changed" }))
+  }
+
+  if (current.value.sessionId !== fact.sessionId) {
+    const view = SessionView.make({
+      protocolVersion: 1,
+      sessionId: fact.sessionId,
+      projectIdentity: fact.projectIdentity,
+      activity: "persisted Codex activity",
+      evidenceSource: "codex-sqlite-thread-index",
+      state: SessionState.cases.Discovered.make({}),
+      freshness: "fresh",
+      sourceUpdatedAtMs: fact.sourceUpdatedAtMs,
+      observedAtMs,
+      commitSequence: current.value.commitSequence + 1,
+    })
+
+    return Result.succeed(
+      TransitionDecision.Changed({
+        view,
+        event: SessionEvent.cases.SessionUpdated.make({
+          protocolVersion: 1,
+          view,
+        }),
+      }),
+    )
   }
 
   if (fact.sourceUpdatedAtMs < current.value.sourceUpdatedAtMs) {
@@ -161,7 +192,7 @@ export const transitionSession = (
   }
 
   if (
-    current.value.state._tag === "Polled" &&
+    (source === "discovery" || current.value.state._tag === "Polled") &&
     fact.sourceUpdatedAtMs === current.value.sourceUpdatedAtMs
   ) {
     return Result.succeed(TransitionDecision.NoChange())

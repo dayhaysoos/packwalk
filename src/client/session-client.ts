@@ -15,8 +15,9 @@ export interface ClientPort {
 
 const projectWidth = 17
 const stateWidth = 11
-const activityWidth = 24
-const updatedWidth = 20
+const sessionWidth = 38
+const evidenceWidth = 27
+const sourceUpdatedWidth = 26
 
 const escapeTerminalText = (value: string): string =>
   Array.from(value, (character) => {
@@ -29,29 +30,14 @@ const escapeTerminalText = (value: string): string =>
       : character
   }).join("")
 
-const fitColumn = (value: string, width: number): string => {
-  const characters = Array.from(value)
-  const fitted =
-    characters.length <= width
-      ? value
-      : `${characters.slice(0, width - 3).join("")}...`
-  return fitted.padEnd(width)
-}
-
-const formatRow = (
-  project: string,
-  state: string,
-  activity: string,
-  updated: string,
+const formatColumns = (
+  columns: ReadonlyArray<readonly [value: string, width?: number]>,
 ): string =>
-  [
-    fitColumn(project, projectWidth),
-    fitColumn(state, stateWidth),
-    fitColumn(activity, activityWidth),
-    fitColumn(updated, updatedWidth).trimEnd(),
-  ].join("  ")
-
-const tableHeader = formatRow("PROJECT", "STATE", "ACTIVITY", "UPDATED")
+  columns
+    .map(([value, width]) =>
+      width === undefined ? value : value.padEnd(width),
+    )
+    .join("  ")
 
 const projectName = (identity: string): string => {
   const withoutTrailingSeparators = identity.replace(/[\\/]+$/u, "")
@@ -61,31 +47,76 @@ const projectName = (identity: string): string => {
   return withoutTrailingSeparators.split(/[\\/]/u).at(-1) ?? identity
 }
 
-const compactUtc = (epochMs: number): string =>
-  new Date(epochMs)
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/u, "Z")
+const utcTimestamp = (epochMs: number): string =>
+  new Date(epochMs).toISOString()
 
-export const formatSessionView = (view: SessionView): ReadonlyArray<string> => [
-  tableHeader,
-  formatRow(
+const formatDetails = (
+  project: string,
+  state: string,
+  activity: string,
+  session: string,
+  evidence: string,
+  freshness: string,
+  sourceUpdated: string,
+  observed: string,
+): ReadonlyArray<string> => [
+  formatColumns([
+    ["PROJECT", projectWidth],
+    ["STATE", stateWidth],
+    ["ACTIVITY"],
+  ]),
+  formatColumns([
+    [project, projectWidth],
+    [state, stateWidth],
+    [activity],
+  ]),
+  formatColumns([
+    ["SESSION", sessionWidth],
+    ["EVIDENCE", evidenceWidth],
+    ["FRESHNESS"],
+  ]),
+  formatColumns([
+    [session, sessionWidth],
+    [evidence, evidenceWidth],
+    [freshness],
+  ]),
+  formatColumns([
+    ["SOURCE UPDATED", sourceUpdatedWidth],
+    ["OBSERVED"],
+  ]),
+  formatColumns([
+    [sourceUpdated, sourceUpdatedWidth],
+    [observed],
+  ]),
+]
+
+export const formatSessionView = (view: SessionView): ReadonlyArray<string> =>
+  formatDetails(
     escapeTerminalText(projectName(view.projectIdentity)),
     view.state._tag.toUpperCase(),
     view.activity,
-    compactUtc(view.sourceUpdatedAtMs),
-  ),
-]
+    escapeTerminalText(view.sessionId),
+    view.evidenceSource,
+    view.freshness,
+    utcTimestamp(view.sourceUpdatedAtMs),
+    utcTimestamp(view.observedAtMs),
+  )
 
 const formatEvent = (event: SessionEvent): ReadonlyArray<string> => {
   if (event._tag !== "SessionUnavailable") {
     return formatSessionView(event.view)
   }
 
-  return [
-    tableHeader,
-    formatRow("-", "UNAVAILABLE", "details unavailable", "-"),
-  ]
+  return formatDetails(
+    "-",
+    "UNAVAILABLE",
+    "details unavailable",
+    "-",
+    "-",
+    "-",
+    "-",
+    "-",
+  )
 }
 
 export const runSessionClient = <E, R>(

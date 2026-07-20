@@ -8,6 +8,8 @@ import {
   CodexPersistedFact,
   ProjectIdentity,
   SessionIdentity,
+  SessionState,
+  SessionView,
 } from "../src/domain/session.js"
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
@@ -78,6 +80,51 @@ it.effect("publishes one committed discovered snapshot and one committed polling
     expect(reconnect[0]).toMatchObject({
       _tag: "SessionSnapshot",
       view: { commitSequence: 2, state: { _tag: "Polled" } },
+    })
+  }),
+)
+
+it.effect("replaces a restored singleton when startup discovers a different one-session identity", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const replacementSessionId =
+      "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+    const surface = yield* makeDeterministicSessionSurface(
+      CodexPersistedFact.make({
+        version: 1,
+        sessionId: SessionIdentity.make(replacementSessionId),
+        projectIdentity: ProjectIdentity.make("replacement-project"),
+        sourceUpdatedAtMs: 1_500,
+      }),
+      {
+        restored: SessionView.make({
+          protocolVersion: 1,
+          sessionId: SessionIdentity.make(sessionId),
+          projectIdentity: ProjectIdentity.make("restored-project"),
+          activity: "persisted Codex activity",
+          evidenceSource: "codex-sqlite-thread-index",
+          state: SessionState.cases.Polled.make({}),
+          freshness: "fresh",
+          sourceUpdatedAtMs: 9_000,
+          observedAtMs: 1_000,
+          commitSequence: 7,
+        }),
+      },
+    )
+
+    const events = Array.from(
+      yield* surface.events.pipe(Stream.take(1), Stream.runCollect),
+    )
+    expect(events[0]).toMatchObject({
+      _tag: "SessionSnapshot",
+      view: {
+        sessionId: replacementSessionId,
+        projectIdentity: "replacement-project",
+        state: { _tag: "Discovered" },
+        sourceUpdatedAtMs: 1_500,
+        observedAtMs: 2_000,
+        commitSequence: 8,
+      },
     })
   }),
 )

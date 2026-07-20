@@ -54,20 +54,71 @@ it.effect("writes discovered and polled public views as visibly different CLI fr
       client,
     )
 
-    expect(yield* Ref.get(frames)).toEqual([
-      [
-        "PROJECT            STATE        ACTIVITY                  UPDATED",
-        "fixture-project    DISCOVERED   persisted Codex activity  1970-01-01 00:00:01Z",
-      ],
-      [
-        "PROJECT            STATE        ACTIVITY                  UPDATED",
-        "fixture-project    POLLED       persisted Codex activity  1970-01-01 00:00:02Z",
-      ],
-    ])
+    const rendered = yield* Ref.get(frames)
+    expect(rendered).toHaveLength(2)
+
+    const initial = rendered[0]?.join("\n") ?? ""
+    const updated = rendered[1]?.join("\n") ?? ""
+    for (const frame of [initial, updated]) {
+      expect(frame).toContain("fixture-project")
+      expect(frame).toContain(sessionId)
+      expect(frame).toContain("persisted Codex activity")
+      expect(frame).toContain("codex-sqlite-thread-index")
+      expect(frame).toContain("fresh")
+      expect(frame).not.toMatch(/\b(?:LIVE|WATCHED)\b/u)
+    }
+    expect(initial).toContain("DISCOVERED")
+    expect(initial).toContain("1970-01-01T00:00:01.000Z")
+    expect(initial).toContain("1970-01-01T00:00:02.000Z")
+    expect(updated).toContain("POLLED")
+    expect(updated).toContain("1970-01-01T00:00:02.500Z")
+    expect(updated).toContain("1970-01-01T00:00:03.000Z")
   }),
 )
 
-it.effect("escapes the visible project label and omits exact identities and source details", () =>
+it.effect("makes subsecond polling updates visibly distinct", () =>
+  Effect.gen(function* () {
+    const frames = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
+    const client: ClientPort = {
+      writeFrame: (lines) => Ref.update(frames, (rendered) => [...rendered, lines]),
+    }
+    const first = SessionView.make({
+      protocolVersion: 1,
+      sessionId: SessionIdentity.make(sessionId),
+      projectIdentity: ProjectIdentity.make("fixture-project"),
+      activity: "persisted Codex activity",
+      evidenceSource: "codex-sqlite-thread-index",
+      state: SessionState.cases.Polled.make({}),
+      freshness: "fresh",
+      sourceUpdatedAtMs: 2_500,
+      observedAtMs: 2_750,
+      commitSequence: 2,
+    })
+    const second = SessionView.make({
+      ...first,
+      sourceUpdatedAtMs: 2_600,
+      observedAtMs: 2_850,
+      commitSequence: 3,
+    })
+
+    yield* runSessionClient(
+      Stream.make(
+        SessionEvent.cases.SessionSnapshot.make({ protocolVersion: 1, view: first }),
+        SessionEvent.cases.SessionUpdated.make({ protocolVersion: 1, view: second }),
+      ),
+      client,
+    )
+
+    const rendered = yield* Ref.get(frames)
+    expect(rendered[0]).not.toEqual(rendered[1])
+    expect(rendered[0]?.join("\n")).toContain("1970-01-01T00:00:02.500Z")
+    expect(rendered[0]?.join("\n")).toContain("1970-01-01T00:00:02.750Z")
+    expect(rendered[1]?.join("\n")).toContain("1970-01-01T00:00:02.600Z")
+    expect(rendered[1]?.join("\n")).toContain("1970-01-01T00:00:02.850Z")
+  }),
+)
+
+it.effect("escapes every visible identity without truncating source details", () =>
   Effect.gen(function* () {
     const frames = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
     const client: ClientPort = {
@@ -95,21 +146,18 @@ it.effect("escapes the visible project label and omits exact identities and sour
       client,
     )
 
-    expect(yield* Ref.get(frames)).toEqual([
-      [
-        "PROJECT            STATE        ACTIVITY                  UPDATED",
-        "repo\\u000D\\u000A   DISCOVERED   persisted Codex activity  1970-01-01 00:00:01Z",
-      ],
-    ])
-    expect(JSON.stringify(yield* Ref.get(frames))).not.toContain(
-      controlledSessionId,
-    )
+    const rendered = JSON.stringify(yield* Ref.get(frames))
+    expect(rendered).toContain("repo\\\\u000D\\\\u000A")
+    expect(rendered).toContain("session\\\\u0009\\\\u0000\\\\u007F")
+    expect(rendered).toContain("codex-sqlite-thread-index")
+    expect(rendered).toContain("fresh")
+    expect(rendered).not.toContain(controlledSessionId)
     expect(view.projectIdentity).toBe(projectIdentity)
     expect(view.sessionId).toBe(controlledSessionId)
   }),
 )
 
-it.effect("truncates a long project component and keeps a useful root fallback", () =>
+it.effect("keeps a complete project component and a useful root fallback", () =>
   Effect.gen(function* () {
     const frames = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
     const client: ClientPort = {
@@ -143,16 +191,11 @@ it.effect("truncates a long project component and keeps a useful root fallback",
       client,
     )
 
-    expect(yield* Ref.get(frames)).toEqual([
-      [
-        "PROJECT            STATE        ACTIVITY                  UPDATED",
-        "repository-wit...  DISCOVERED   persisted Codex activity  1970-01-01 00:00:01Z",
-      ],
-      [
-        "PROJECT            STATE        ACTIVITY                  UPDATED",
-        "/                  DISCOVERED   persisted Codex activity  1970-01-01 00:00:01Z",
-      ],
-    ])
+    const rendered = yield* Ref.get(frames)
+    expect(rendered[0]?.join("\n")).toContain(
+      "repository-with-very-long-name",
+    )
+    expect(rendered[1]?.join("\n")).toContain("/")
   }),
 )
 
@@ -174,11 +217,10 @@ it.effect("renders unavailable as one redacted table row", () =>
       client,
     )
 
-    expect(yield* Ref.get(frames)).toEqual([
-      [
-        "PROJECT            STATE        ACTIVITY                  UPDATED",
-        "-                  UNAVAILABLE  details unavailable       -",
-      ],
-    ])
+    const rendered = yield* Ref.get(frames)
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0]).toHaveLength(6)
+    expect(rendered[0]?.join("\n")).toContain("UNAVAILABLE")
+    expect(rendered[0]?.join("\n")).toContain("details unavailable")
   }),
 )

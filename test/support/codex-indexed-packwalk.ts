@@ -18,6 +18,7 @@ import { sessionDaemonLayer } from "../../src/daemon/session-runtime.js"
 import type { SessionEvent } from "../../src/domain/session.js"
 import {
   createCodexIndexFixture,
+  replaceCodexIndexFixture,
   updateCodexIndexFixture,
   type CodexIndexFixture,
 } from "./codex-index-fixture.js"
@@ -26,6 +27,9 @@ export interface CodexIndexedPackWalk {
   readonly events: Stream.Stream<SessionEvent, LocalIpcError>
   readonly persistCodexActivity: (
     sourceUpdatedAtMs: number,
+  ) => Effect.Effect<void, unknown>
+  readonly replaceCodexSession: (
+    replacement: Omit<CodexIndexFixture, "forbiddenContent">,
   ) => Effect.Effect<void, unknown>
 }
 
@@ -59,6 +63,12 @@ export const makeCodexIndexedPackWalk = (
           codexDatabasePath,
           fixture.sessionId,
           sourceUpdatedAtMs,
+        ),
+      replaceCodexSession: (replacement) =>
+        replaceCodexIndexFixture(
+          codexDatabasePath,
+          fixture.sessionId,
+          replacement,
         ),
     }
   })

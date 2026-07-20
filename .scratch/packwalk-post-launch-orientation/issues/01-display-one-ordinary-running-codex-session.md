@@ -25,7 +25,7 @@ updates once after polling detects later Codex activity.
 - [x] The daemon's public session query/event surface returns the initial
       committed view and one committed update after the deterministic source
       changes.
-- [ ] One compact plain CLI table consumes that public surface, visibly presents
+- [x] One compact plain CLI table consumes that public surface, visibly presents
       the real project, exact session identity, supported activity, evidence
       source, freshness, observation/update time, and honest state, and, on a
       capable terminal with enough width, refreshes the same lines after the
@@ -78,3 +78,18 @@ repository-local execution of the package binary is required.
   even though the maintainer's accepted runnable demonstration requires those
   fields to be visible. The PackWalk public view already carries them; Ticket 01
   remains open until its human CLI presents them as well as visibly polling.
+- 2026-07-19: Agent-verifiable implementation is complete on
+  `agent/ticket-01-acceptance` and the required review gates are in progress.
+  Diagnosis reproduced two real failures: a persistent daemon remained pinned
+  to an older singleton (and a cold restart rejected the newly discovered
+  identity), while second-only CLI timestamps could make distinct subsecond
+  commits render identically. Each CLI subscription now refreshes the existing
+  one-session discovery before returning its snapshot, and a different
+  supported identity replaces only that singleton while preserving monotonic
+  commit order. The six-line plain table shows project, exact session identity,
+  activity, evidence, freshness, millisecond source-update time, observation
+  time, and honest state without adding multi-session or live behavior.
+  `npm run verify` passes 15 deterministic files and 64 tests. A real cold start
+  from the previously failing persisted state, followed by a reconnect to the
+  surviving daemon, both selected the active PackWalk task and visibly rendered
+  later persisted source updates. The maintainer criterion remains unchecked.

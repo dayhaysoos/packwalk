@@ -13,9 +13,11 @@ import {
   layer as sessionSurfaceLayer,
   Service as SessionSurface,
 } from "../../src/application/session-surface.js"
+import { Service as SessionStorage } from "../../src/application/session-storage.js"
 import {
   CodexPersistedFact,
   type SessionEvent,
+  type SessionView,
 } from "../../src/domain/session.js"
 
 export interface DeterministicSessionSurface {
@@ -25,8 +27,13 @@ export interface DeterministicSessionSurface {
   ) => Effect.Effect<void>
 }
 
+export interface DeterministicSessionSurfaceOptions {
+  readonly restored?: SessionView
+}
+
 export const makeDeterministicSessionSurface = (
   initial: CodexPersistedFact,
+  options: DeterministicSessionSurfaceOptions = {},
 ): Effect.Effect<DeterministicSessionSurface, unknown, Scope.Scope> =>
   Effect.gen(function* () {
     const factRef = yield* Ref.make(initial)
@@ -41,9 +48,23 @@ export const makeDeterministicSessionSurface = (
       discover: read,
       poll: read,
     }
+    const storagePath = join(directory, "packwalk.sqlite")
+    const restored = options.restored
+    if (restored !== undefined) {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const storageContext = yield* Layer.build(
+            sqliteSessionStorageLayer(storagePath),
+          )
+          yield* Context.get(storageContext, SessionStorage).commit(
+            restored,
+          )
+        }),
+      )
+    }
     const dependencies = Layer.mergeAll(
       Layer.succeed(SessionSource, SessionSource.of(source)),
-      sqliteSessionStorageLayer(join(directory, "packwalk.sqlite")),
+      sqliteSessionStorageLayer(storagePath),
     )
     const context = yield* Layer.build(
       sessionSurfaceLayer.pipe(Layer.provide(dependencies)),
