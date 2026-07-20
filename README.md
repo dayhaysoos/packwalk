@@ -125,11 +125,14 @@ listener is not evidence that a healthy PackWalk daemon is already running.
 PackWalk opens its authoritative database only after qualifying the physical
 storage directory as APFS on macOS or one of an explicit set of direct local
 filesystems on Linux. Remote, unknown, stacked, or failed POSIX filesystem
-probes fail before SQLite opens. The pinned Node runtime cannot positively
-distinguish a mapped Windows drive from a local drive, so release storage fails
-closed on Windows even for an ordinary drive spelling. Deterministic Windows
-path and named-pipe contracts remain covered; Ticket 10 must add native volume
-qualification before Windows can open authoritative storage.
+probes fail before SQLite opens. An existing database object and its physical
+parent must both qualify and report the same positive native storage device;
+the same rule applies to a final symlink's resolved target. The pinned Node
+runtime cannot positively distinguish a mapped Windows drive from a local
+drive, so release storage fails closed on Windows even for an ordinary drive
+spelling. Deterministic Windows path and named-pipe contracts remain covered;
+Ticket 10 must add native volume qualification before Windows can open
+authoritative storage.
 
 A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live

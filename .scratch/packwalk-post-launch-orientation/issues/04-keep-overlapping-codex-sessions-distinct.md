@@ -475,3 +475,38 @@ sessions overlap, share a repository, or have duplicate display labels.
   23156 was stopped; v1 PID 77857 remains alive and untouched. Ticket 04 is
   claimed only for an entirely fresh generic review and independent product
   preflight.
+- 2026-07-20: Fresh generic review pass 12 reports zero actionable
+  Specification findings and two P1 Standards/storage blockers. An existing
+  database object can be a single-file bind mount on unqualified storage even
+  when its parent qualifies, so object and parent must both qualify and share
+  the same native storage device. The intentional Windows fail-closed policy
+  also leaves
+  native success-path tests guaranteed to fail on Windows and host-coupled on
+  unqualified Linux temporary filesystems. Red regressions now cover both
+  direct and final-symlink database-object qualification. Native product tests
+  must separate injected path/identity laws, qualified-host success, and
+  visible unqualified-host failure with no database or endpoint publication.
+  Ticket 04 remains claimed; verification, fresh generic review, and product
+  preflight are paused until both blockers are repaired.
+- 2026-07-20: Both pass 12 blockers are implemented. Existing direct database
+  files and resolved final-symlink targets receive their own filesystem
+  qualification and must share a positive native storage device with the
+  qualified physical parent; revalidation applies the same law after a missing
+  database is created. Native product tests now select qualified-host text/JSON
+  success or unqualified-host redacted failure before database or endpoint
+  publication. Pure injected path, identity, and endpoint laws remain
+  cross-platform, and the opt-in real-Codex test skips hosts where product
+  storage cannot qualify. Focused tests, full verification, and an entirely
+  fresh generic review remain pending; product preflight stays paused.
+- 2026-07-20: Post-repair qualification is green. The focused runtime/product
+  suite passes 55 tests with the opposite host-policy branch intentionally
+  skipped. `npm run verify` passes 22 files, 147 tests, and one intentional
+  host-policy branch skip plus typecheck, lint, and build; the real
+  persisted-Codex check passes in 8.24 seconds. On the fresh compiled build,
+  ordinary and transport-unlinked contenders both exited 1, the sole database
+  owner stayed alive, and a successor after deliberate `SIGKILL` reopened both
+  exact fixture sessions with zero combined output bytes. Installed text and
+  JSON returned 19 unique exact identities, including two in one project.
+  Positively identified v2 database/endpoint owner PID 70385 was stopped; v1
+  PID 77857 remains alive and untouched. Ticket 04 is claimed only for an
+  entirely fresh generic review and independent product preflight.

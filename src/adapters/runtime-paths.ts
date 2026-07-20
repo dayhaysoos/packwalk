@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import {
+  type BigIntStats,
   closeSync,
   constants as fileSystemConstants,
   fchmodSync,
@@ -104,25 +105,33 @@ export const isQualifiedLocalStorageFileSystem = ({
     : qualifiedLocalLinuxFileSystemTypes.has(normalizedType)
 }
 
+/** @internal Exported for deterministic existing-database authority laws. */
+export const isSamePhysicalStorageDevice = (
+  databaseDeviceId: bigint,
+  parentDeviceId: bigint,
+): boolean =>
+  databaseDeviceId > 0n &&
+  parentDeviceId > 0n &&
+  databaseDeviceId === parentDeviceId
+
 export type StorageFileSystemProbe = (
-  physicalDirectory: string,
+  physicalPath: string,
 ) => bigint
 
 const probeNativeStorageFileSystem: StorageFileSystemProbe =
-  (physicalDirectory) =>
-    statfsSync(physicalDirectory, { bigint: true }).type
+  (physicalPath) => statfsSync(physicalPath, { bigint: true }).type
 
 const requireQualifiedLocalStorageFileSystem = (
-  physicalDirectory: string,
+  physicalPath: string,
   platform: RuntimePathInputs["platform"],
   probe: StorageFileSystemProbe,
 ): void => {
   const fileSystemType =
-    platform === "win32" ? 0n : probe(physicalDirectory)
+    platform === "win32" ? 0n : probe(physicalPath)
   if (
     !isQualifiedLocalStorageFileSystem({
       platform,
-      physicalDirectory,
+      physicalDirectory: physicalPath,
       fileSystemType,
     })
   ) {
@@ -172,6 +181,7 @@ const captureNativeDirectoryAuthority = (
   directory: string,
   databaseName: string,
   probeStorageFileSystem: StorageFileSystemProbe,
+  existingDatabaseDeviceId?: bigint,
 ): DurableDatabaseAuthority => {
   const directoryPath = realpathSync.native(directory)
   if (!supportedPlatform(process.platform)) {
@@ -188,9 +198,17 @@ const captureNativeDirectoryAuthority = (
   )
 
   if (process.platform === "win32") {
-    const identity = statSync(directory, { bigint: true })
+    const identity = statSync(directoryPath, { bigint: true })
     if (!identity.isDirectory()) {
       throw new Error("Durable database authority is not a directory")
+    }
+    if (
+      existingDatabaseDeviceId !== undefined &&
+      !isSamePhysicalStorageDevice(existingDatabaseDeviceId, identity.dev)
+    ) {
+      throw new Error(
+        "Durable database and parent must share storage authority",
+      )
     }
     const authority = {
       deviceId: identity.dev,
@@ -221,6 +239,14 @@ const captureNativeDirectoryAuthority = (
       (identity.mode & 0o777n) !== 0o700n
     ) {
       throw new Error("Durable database authority is not private")
+    }
+    if (
+      existingDatabaseDeviceId !== undefined &&
+      !isSamePhysicalStorageDevice(existingDatabaseDeviceId, identity.dev)
+    ) {
+      throw new Error(
+        "Durable database and parent must share storage authority",
+      )
     }
     const authority = {
       deviceId: identity.dev,
@@ -273,14 +299,27 @@ const secureNativePackWalkDataDirectory = (directory: string): void => {
   }
 }
 
-const requireSingleLinkDatabaseEntry = (path: string): void => {
+const requireQualifiedSingleLinkDatabaseEntry = (
+  path: string,
+  probeStorageFileSystem: StorageFileSystemProbe,
+): BigIntStats => {
   const entry = statSync(path, { bigint: true })
   if (!entry.isFile() || entry.nlink !== 1n) {
     throw new Error("Durable database must have exactly one link")
   }
+  if (!supportedPlatform(process.platform)) {
+    throw new Error("Unsupported operating system")
+  }
+  requireQualifiedLocalStorageFileSystem(
+    path,
+    process.platform,
+    probeStorageFileSystem,
+  )
+  return entry
 }
 
-const captureNativeDurablePath = (
+/** @internal Exported for deterministic revalidation laws. */
+export const captureNativeDurablePath = (
   path: string,
   probeStorageFileSystem: StorageFileSystemProbe =
     probeNativeStorageFileSystem,
@@ -299,22 +338,31 @@ const captureNativeDurablePath = (
       )
     }
     const resolvedDatabasePath = realpathSync.native(path)
-    requireSingleLinkDatabaseEntry(resolvedDatabasePath)
+    const databaseEntry = requireQualifiedSingleLinkDatabaseEntry(
+      resolvedDatabasePath,
+      probeStorageFileSystem,
+    )
     return captureNativeDirectoryAuthority(
       dirname(resolvedDatabasePath),
       basename(resolvedDatabasePath),
       probeStorageFileSystem,
+      databaseEntry.dev,
     )
   }
 
+  let existingDatabaseDeviceId: bigint | undefined
   if (existingEntry !== undefined) {
-    requireSingleLinkDatabaseEntry(path)
+    existingDatabaseDeviceId = requireQualifiedSingleLinkDatabaseEntry(
+      path,
+      probeStorageFileSystem,
+    ).dev
   }
 
   return captureNativeDirectoryAuthority(
     dirname(path),
     basename(path),
     probeStorageFileSystem,
+    existingDatabaseDeviceId,
   )
 }
 

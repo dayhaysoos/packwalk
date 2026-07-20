@@ -13,7 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { NodeServices } from "@effect/platform-node"
@@ -21,10 +21,12 @@ import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer, Result } from "effect"
 
 import {
+  captureNativeDurablePath,
   type DurableDatabaseAuthority,
   deriveRuntimePaths,
   identifyNativeDurablePath,
   isQualifiedLocalStorageFileSystem,
+  isSamePhysicalStorageDevice,
   prepareRuntimeDirectories,
   RuntimePaths,
   type RuntimePathInputs,
@@ -32,6 +34,7 @@ import {
   verifyRuntimeAuthority,
 } from "../src/adapters/runtime-paths.js"
 import { layer as sqliteSessionStorageLayer } from "../src/adapters/sqlite-session-storage.js"
+import { isNativeStorageQualified } from "./support/native-storage.js"
 
 const databaseAuthority = (
   fileId: bigint = 1n,
@@ -49,6 +52,21 @@ const identifyAs = (authority: DurableDatabaseAuthority) => () => authority
 const identifyTestDatabase = identifyAs(databaseAuthority())
 const nativeTempDirectory =
   process.platform === "darwin" ? "/private/tmp" : tmpdir()
+const qualifiedNativeFileSystemType =
+  process.platform === "darwin" ? 0x1an : 0xef53n
+const identifyQualifiedNativeDurablePath = (path: string) =>
+  identifyNativeDurablePath(path, () => qualifiedNativeFileSystemType)
+const captureQualifiedNativeDurablePath = (path: string) =>
+  captureNativeDurablePath(path, () => qualifiedNativeFileSystemType)
+const nativeHomeDataRoot =
+  process.platform === "darwin"
+    ? join(homedir(), "Library", "Application Support")
+    : process.platform === "linux"
+      ? join(homedir(), ".local", "share")
+      : join(homedir(), "AppData", "Local")
+const nativeHomeStorageQualified = isNativeStorageQualified(
+  nativeHomeDataRoot,
+)
 
 const nativeRuntimeInput = (root: string): RuntimePathInputs => {
   switch (process.platform) {
@@ -149,6 +167,12 @@ describe("PackWalk runtime paths", () => {
     ).toBe(false)
   })
 
+  it("requires an existing database object and its parent to share a storage device", () => {
+    expect(isSamePhysicalStorageDevice(41n, 41n)).toBe(true)
+    expect(isSamePhysicalStorageDevice(41n, 42n)).toBe(false)
+    expect(isSamePhysicalStorageDevice(0n, 0n)).toBe(false)
+  })
+
   it("rejects a Windows UNC data root before native identification", () => {
     let identified = false
 
@@ -241,11 +265,110 @@ describe("PackWalk runtime paths", () => {
         })
 
         expect(probedDirectories).toEqual([
+          realpathSync.native(targetDatabase),
           realpathSync.native(targetDirectory),
         ])
       } finally {
         rmSync(testRoot, { recursive: true, force: true })
       }
+    },
+  )
+
+  it.each([
+    { kind: "direct" as const },
+    { kind: "symlink" as const },
+  ])(
+    "rejects an existing $kind database object on an unqualified filesystem",
+    ({ kind }) => {
+      if (process.platform === "win32") return
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-no-"))
+      const lexicalDirectory = join(testRoot, "lexical")
+      const targetDirectory = join(testRoot, "target")
+      const targetDatabase = join(targetDirectory, "packwalk-v2.sqlite")
+      const databasePath =
+        kind === "direct"
+          ? targetDatabase
+          : join(lexicalDirectory, "packwalk-v2.sqlite")
+      const qualifiedType = process.platform === "darwin" ? 0x1an : 0xef53n
+      mkdirSync(lexicalDirectory, { mode: 0o700 })
+      mkdirSync(targetDirectory, { mode: 0o700 })
+      writeFileSync(targetDatabase, "database")
+      if (kind === "symlink") {
+        symlinkSync(targetDatabase, databasePath, "file")
+      }
+
+      try {
+        const physicalTargetDatabase = realpathSync.native(targetDatabase)
+        expect(() =>
+          identifyNativeDurablePath(databasePath, (physicalPath) =>
+            physicalPath === physicalTargetDatabase ? 0x6969n : qualifiedType,
+          ),
+        ).toThrow("PackWalk storage requires a qualified local filesystem")
+      } finally {
+        rmSync(testRoot, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.each(["zero", "failure"] as const)(
+    "fails closed when an existing database object probe returns $case",
+    (result) => {
+      if (process.platform === "win32") return
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-np-"))
+      const databasePath = join(testRoot, "packwalk-v2.sqlite")
+      writeFileSync(databasePath, "database")
+      const physicalDatabasePath = realpathSync.native(databasePath)
+
+      try {
+        expect(() =>
+          identifyNativeDurablePath(databasePath, (physicalPath) => {
+            if (physicalPath !== physicalDatabasePath) {
+              return qualifiedNativeFileSystemType
+            }
+            if (result === "failure") {
+              throw new Error("filesystem probe failed")
+            }
+            return 0n
+          }),
+        ).toThrow()
+      } finally {
+        rmSync(testRoot, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.effect.skipIf(process.platform === "win32")(
+    "fails revalidation when a created database object is on unqualified storage",
+    () => {
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-nc-"))
+      const paths = deriveRuntimePaths(
+        nativeRuntimeInput(testRoot),
+        identifyQualifiedNativeDurablePath,
+      )
+      writeFileSync(paths.packWalkDatabasePath, "database")
+      const physicalDatabasePath = realpathSync.native(
+        paths.packWalkDatabasePath,
+      )
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+        )
+        const failure = yield* verifyRuntimeAuthority(
+          paths,
+          (databasePath) =>
+            captureNativeDurablePath(databasePath, (physicalPath) =>
+              physicalPath === physicalDatabasePath
+                ? 0x6969n
+                : qualifiedNativeFileSystemType,
+            ),
+        ).pipe(Effect.flip)
+
+        expect(failure).toMatchObject({
+          _tag: "PackWalk.RuntimePathError",
+          message: "PackWalk database authority changed",
+        })
+      }).pipe(Effect.scoped)
     },
   )
 
@@ -469,7 +592,7 @@ describe("PackWalk runtime paths", () => {
     ).toThrow("Native directory identity is unavailable")
   })
 
-  it.effect(
+  it.effect.skipIf(process.platform === "win32")(
     "rejects hard-linked database entries during resolution and revalidation",
     () => {
       const firstRoot = mkdtempSync(join(nativeTempDirectory, "pw-ha-"))
@@ -484,11 +607,11 @@ describe("PackWalk runtime paths", () => {
         )
         const firstPaths = deriveRuntimePaths(
           nativeRuntimeInput(firstRoot),
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
         const secondPaths = deriveRuntimePaths(
           nativeRuntimeInput(secondRoot),
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
         writeFileSync(firstPaths.packWalkDatabasePath, "database")
         linkSync(
@@ -509,15 +632,16 @@ describe("PackWalk runtime paths", () => {
           linkCount: 2,
         })
         expect(() =>
-          identifyNativeDurablePath(firstPaths.packWalkDatabasePath),
+          identifyQualifiedNativeDurablePath(firstPaths.packWalkDatabasePath),
         ).toThrow("Durable database must have exactly one link")
         expect(() =>
-          identifyNativeDurablePath(secondPaths.packWalkDatabasePath),
+          identifyQualifiedNativeDurablePath(secondPaths.packWalkDatabasePath),
         ).toThrow("Durable database must have exactly one link")
 
-        const failure = yield* verifyRuntimeAuthority(firstPaths).pipe(
-          Effect.flip,
-        )
+        const failure = yield* verifyRuntimeAuthority(
+          firstPaths,
+          captureQualifiedNativeDurablePath,
+        ).pipe(Effect.flip)
         expect(failure).toMatchObject({
           _tag: "PackWalk.RuntimePathError",
           message: "PackWalk database authority changed",
@@ -543,7 +667,7 @@ describe("PackWalk runtime paths", () => {
             homeDirectory: "/home/example",
             xdgDataHome: physicalDataRoot,
           },
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
         const aliasedBeforeCreation = deriveRuntimePaths(
           {
@@ -551,7 +675,7 @@ describe("PackWalk runtime paths", () => {
             homeDirectory: "/different/launch-home",
             xdgDataHome: directoryAlias,
           },
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
 
         expect(aliasedBeforeCreation.packWalkDatabasePath).not.toBe(
@@ -568,7 +692,7 @@ describe("PackWalk runtime paths", () => {
             homeDirectory: "/home/example",
             xdgDataHome: physicalDataRoot,
           },
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
         expect(physicalAfterCreation.ipcEndpoint).toBe(
           physicalBeforeCreation.ipcEndpoint,
@@ -587,7 +711,7 @@ describe("PackWalk runtime paths", () => {
             homeDirectory: "/home/example",
             xdgDataHome: physicalDataRoot,
           },
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
         expect(physicalAfterReplacement.ipcEndpoint).toBe(
           physicalBeforeCreation.ipcEndpoint,
@@ -609,7 +733,7 @@ describe("PackWalk runtime paths", () => {
             homeDirectory: "/directory-symlink-home",
             xdgDataHome: directorySymlinkDataRoot,
           },
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
         expect(aliasedPackWalkDirectory.ipcEndpoint).toBe(
           physicalBeforeCreation.ipcEndpoint,
@@ -629,7 +753,7 @@ describe("PackWalk runtime paths", () => {
             homeDirectory: "/another/launch-home",
             xdgDataHome: fileAliasDataRoot,
           },
-          identifyNativeDurablePath,
+          identifyQualifiedNativeDurablePath,
         )
 
         expect(
@@ -751,7 +875,7 @@ describe("PackWalk runtime paths", () => {
       symlinkSync(targetDatabasePath, databasePath, "file")
 
       try {
-        expect(() => identifyNativeDurablePath(databasePath)).toThrow(
+        expect(() => identifyQualifiedNativeDurablePath(databasePath)).toThrow(
           "Durable database authority is not private",
         )
         expect(statSync(sharedDirectory).mode & 0o777).toBe(0o777)
@@ -773,7 +897,7 @@ describe("PackWalk runtime paths", () => {
           homeDirectory: "/home/example",
           xdgDataHome: dataRoot,
         },
-        identifyNativeDurablePath,
+        identifyQualifiedNativeDurablePath,
       )
       const previousDataDirectory = join(testRoot, "previous-packwalk")
       renameSync(paths.packWalkDataDirectory, previousDataDirectory)
@@ -782,7 +906,10 @@ describe("PackWalk runtime paths", () => {
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
         )
-        const failure = yield* verifyRuntimeAuthority(paths).pipe(Effect.flip)
+        const failure = yield* verifyRuntimeAuthority(
+          paths,
+          captureQualifiedNativeDurablePath,
+        ).pipe(Effect.flip)
 
         expect(failure).toMatchObject({
           _tag: "PackWalk.RuntimePathError",
@@ -808,7 +935,7 @@ describe("PackWalk runtime paths", () => {
           homeDirectory: "/home/example",
           xdgDataHome: dataRoot,
         },
-        identifyNativeDurablePath,
+        identifyQualifiedNativeDurablePath,
       )
       renameSync(
         paths.packWalkDataDirectory,
@@ -827,7 +954,10 @@ describe("PackWalk runtime paths", () => {
         const launch = yield* Effect.result(
           Effect.gen(function* () {
             yield* prepareRuntimeDirectories
-            yield* verifyRuntimeAuthority(paths)
+            yield* verifyRuntimeAuthority(
+              paths,
+              captureQualifiedNativeDurablePath,
+            )
           }),
         )
 
@@ -979,32 +1109,35 @@ describe("PackWalk runtime paths", () => {
     },
   )
 
-  it.effect("reads path overrides from the active Effect config provider", () => {
-    const codexHome =
-      process.platform === "win32"
-        ? "D:\\ConfiguredCodex"
-        : "/configured/codex"
-    const expectedDatabasePath =
-      process.platform === "win32"
-        ? "D:\\ConfiguredCodex\\state_5.sqlite"
-        : "/configured/codex/state_5.sqlite"
+  it.effect.skipIf(!nativeHomeStorageQualified)(
+    "reads path overrides from the active Effect config provider",
+    () => {
+      const codexHome =
+        process.platform === "win32"
+          ? "D:\\ConfiguredCodex"
+          : "/configured/codex"
+      const expectedDatabasePath =
+        process.platform === "win32"
+          ? "D:\\ConfiguredCodex\\state_5.sqlite"
+          : "/configured/codex/state_5.sqlite"
 
-    return Effect.gen(function* () {
-      const paths = yield* RuntimePaths
+      return Effect.gen(function* () {
+        const paths = yield* RuntimePaths
 
-      expect(paths.codexDatabasePath).toBe(expectedDatabasePath)
-    }).pipe(
-      Effect.provide(runtimePathsLayer),
-      Effect.provide(
-        ConfigProvider.layer(
-          ConfigProvider.fromUnknown({
-            CODEX_HOME: codexHome,
-            XDG_RUNTIME_DIR: "ignored-relative-runtime-directory",
-          }),
+        expect(paths.codexDatabasePath).toBe(expectedDatabasePath)
+      }).pipe(
+        Effect.provide(runtimePathsLayer),
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              CODEX_HOME: codexHome,
+              XDG_RUNTIME_DIR: "ignored-relative-runtime-directory",
+            }),
+          ),
         ),
-      ),
-    )
-  })
+      )
+    },
+  )
 
   it.effect("fails visibly when Effect config supplies a relative path override", () =>
     Effect.gen(function* () {

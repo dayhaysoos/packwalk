@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 
@@ -17,8 +17,20 @@ import {
   layer as sqliteSessionStorageLayer,
 } from "../src/adapters/sqlite-session-storage.js"
 import { sessionDaemonLayer } from "../src/daemon/session-runtime.js"
+import { isNativeStorageQualified } from "./support/native-storage.js"
 
-it.live("observes one later persisted update from an ordinary existing Codex session", () =>
+const nativePackWalkDataRoot =
+  process.platform === "darwin"
+    ? join(homedir(), "Library", "Application Support")
+    : process.platform === "linux"
+      ? process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share")
+      : process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local")
+
+const realCodexTest = it.live.skipIf(
+  !isNativeStorageQualified(nativePackWalkDataRoot),
+)
+
+realCodexTest("observes one later persisted update from an ordinary existing Codex session", () =>
   Effect.gen(function* () {
     const paths = yield* RuntimePaths
     const directory = yield* Effect.acquireRelease(

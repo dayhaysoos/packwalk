@@ -32,14 +32,17 @@ The database lives in PackWalk's platform-specific application-data directory
 only when its physical parent is qualified as local before SQLite opens.
 macOS requires APFS; Linux uses an explicit local-filesystem allowlist and
 rejects unknown, remote, zero, failed, or stacked-filesystem probes. The pinned
-Node runtime cannot positively distinguish a mapped Windows drive from a local
-drive, so authoritative storage fails closed on Windows before directory or
-SQLite creation. Ticket 10 must add native volume qualification before Windows
-storage is supported. The authoritative connection explicitly enables and
-verifies exclusive locking, foreign keys, defensive mode, extension
-prohibition, busy timeout, integer behavior, WAL, and `synchronous=FULL`.
-Authoritative commands that may write use `BEGIN IMMEDIATE`; read-only queries
-do not start an additional write transaction.
+Node runtime must qualify both an existing database object and its physical
+parent and require the same positive native storage device; final symlinks use
+their resolved target object and parent. It cannot positively distinguish a
+mapped Windows drive from a local drive, so authoritative storage fails closed
+on Windows before directory or SQLite creation. Ticket 10 must add native
+volume qualification before Windows storage is supported. The authoritative
+connection explicitly enables and verifies exclusive locking, foreign keys,
+defensive mode, extension prohibition, busy timeout, integer behavior, WAL,
+and `synchronous=FULL`. Authoritative commands that may write use
+`BEGIN IMMEDIATE`; read-only queries do not start an additional write
+transaction.
 
 Portable, repository-owned migrations are immutable, ordered, checksummed,
 forward-only, and transactionally applied. They do not depend on
