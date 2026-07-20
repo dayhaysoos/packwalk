@@ -14,8 +14,8 @@ for them.
 
 [Ticket 01](../.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
 delivers one independently discovered session through the daemon and plain CLI.
-The implementation exists, but the visible real-session polling refresh has
-been reopened for maintainer acceptance.
+The maintainer accepted its continuously running real-session polling refresh
+on 2026-07-20.
 
 This phase is read-only. That limitation belongs to the phase, not PackWalk's
 long-term product definition.
@@ -43,6 +43,11 @@ until final packaging to consider portability:
 - [Ticket 08: schema upgrade and backup recovery](../.scratch/packwalk-post-launch-orientation/issues/08-recover-from-sqlite-schema-upgrades-and-backups.md)
 - [Ticket 09: contention, rollback, and failed commits](../.scratch/packwalk-post-launch-orientation/issues/09-surface-sqlite-contention-rollback-and-failed-commits-safely.md)
 - [Ticket 10: accumulated cross-platform verification](../.scratch/packwalk-post-launch-orientation/issues/10-verify-the-polling-product-on-windows-macos-and-linux.md)
+
+After the multi-session shape exists, a separate readability slice will make
+project, attention, and newly observed changes easier to notice while keeping
+exact identity, evidence, and freshness available in the plain CLI. This
+non-blocking improvement does not reopen Ticket 01.
 
 ## Phase 4: Qualify exact-target intervention
 

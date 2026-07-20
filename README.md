@@ -8,11 +8,11 @@ without owning the lifecycle of the Codex sessions it assists.
 
 ## Status
 
-PackWalk's current implementation is a read-only polling slice. It discovers
-one existing Codex session, persists a content-free current view, exposes it
-through the PackWalk daemon, and displays polling updates in a plain command-line
-view. It does not yet establish trustworthy live attachment or perform a
-consequential action.
+PackWalk's accepted first implementation is a read-only polling slice. It
+discovers one existing Codex session, persists a content-free current view,
+exposes it through the PackWalk daemon, and displays polling updates in a plain
+command-line view. It does not yet establish trustworthy live attachment or
+perform a consequential action.
 
 Read-only behavior is the current delivery state, not PackWalk's permanent
 product boundary. The intended local product progresses from truthful
@@ -85,11 +85,13 @@ A newly discovered view is labelled `discovered`; its first successful reread
 and later persisted changes are labelled `polled`. Neither label claims live
 attachment or direct control.
 
-The corrected real-session presentation and reconnect recovery are undergoing
-final branch review before renewed maintainer acceptance. The maintainer's
-personal real-product criterion remains deliberately unchecked. See
-[current state](docs/current-state.md) and
-[Ticket 01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md).
+The maintainer accepted the corrected real-session presentation and reconnect
+recovery after one continuously running CLI kept the same exact session and
+redrew a later committed source timestamp in place. The current six-line view
+still has non-blocking visual-hierarchy feedback; a separate readability slice
+will address that after the multi-session shape exists. See [current
+state](docs/current-state.md) and [Ticket
+01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md).
 
 ## Verify the current implementation
 

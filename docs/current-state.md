@@ -1,6 +1,6 @@
 # PackWalk current state
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 This is the handoff entry point for what exists today. Product direction lives
 in [the product model](product.md), domain language in
@@ -42,20 +42,19 @@ The implementation uses the pinned Node, Effect v4, Effect Schema, and
 renderer, Bun runtime, consequential action, natural-language router, or remote
 client.
 
-## Active acceptance issue
+## Accepted first tracer bullet
 
 [Ticket 01](../.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
-is ready for final maintainer acceptance on `agent/ticket-01-acceptance`. The
-maintainer's failed demonstration was reproduced: a persistent daemon could
+is maintainer-accepted and resolved. In one continuously running CLI, the same
+exact session advanced from source timestamp `2026-07-20T05:21:21.577Z` to
+`2026-07-20T05:30:29.700Z` without restarting PackWalk; the later update was
+committed and redrawn in place.
+
+The accepted repair addressed two real failures: a persistent daemon could
 remain pinned to an older singleton, and a cold restart then rejected a newly
 discovered identity. Separately, second-only CLI timestamps could render
-distinct subsecond polling commits identically.
-
-Polling is not trustworthy live observation and should not be described as
-real-time attachment. It must nevertheless publish and visibly render a new
-committed frame after the supported Codex persisted source changes. The report
-must be diagnosed through the source, daemon publication, IPC stream, and CLI
-redraw seams before personal acceptance can be restored.
+distinct subsecond polling commits identically. Polling remains delayed
+persisted observation rather than trustworthy live or real-time attachment.
 
 The branch now refreshes the existing one-session discovery when a CLI
 subscribes, replaces only that singleton when supported discovery identifies a
@@ -72,11 +71,14 @@ evidence restoration, reconnect, and a later exact-identity committed update.
 Deterministic verification (15 files, 65 tests), the opt-in real-Codex check,
 and bounded cold-start-plus-reconnect exercises are green. Final generic review
 is clean with zero Standards and zero Ticket 01 specification findings.
-Independent product preflight reports `READY FOR MAINTAINER`. The real review
-terminal was cursor-disabled and correctly exercised complete appended frames;
-the capable 80-column in-place redraw remains deterministically covered. No
-known agent-verifiable blocker remains, and the maintainer's personal
-observation is intentionally still unchecked.
+Independent product preflight reported `READY FOR MAINTAINER`. The maintainer's
+accepted demonstration now supplies the remaining capable-terminal in-place
+redraw evidence.
+
+The six-line singleton display still has weak visual hierarchy and makes a new
+update difficult to notice. This is non-blocking product feedback for a
+separate readability slice after the multi-session shape exists; it does not
+reopen Ticket 01 polling.
 
 ## Reproduce
 
@@ -125,10 +127,10 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Have the maintainer personally rerun the repository command and provide
-   subjective feedback on the visible result.
-2. Only after Ticket 01 resolves, begin the bounded Ticket 02 live-event
-   experiment.
+1. Publish the accepted Ticket 01 slice, then begin the bounded Ticket 02
+   live-event experiment from `integration/full-local-product`.
+2. Deliver the remaining polling tickets in dependency order, including a
+   separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check
 
@@ -144,9 +146,9 @@ following without inspecting old commits or another checkout:
    session lifecycle or start idle work.
 5. Remote web, mobile, and cross-device supervision is a bonus horizon after
    the successful local core, not a current blocker.
-6. Ticket 01's implementation and agent review gates are complete on its
-   acceptance branch, but the maintainer's personal real-product observation
-   remains before resolution.
+6. Ticket 01 is maintainer-accepted and resolved; the remaining local product
+   continues through the polling, intervention-qualification, and routing
+   phases without reopening its polling result.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote

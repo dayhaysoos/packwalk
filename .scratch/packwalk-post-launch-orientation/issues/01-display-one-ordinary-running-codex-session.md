@@ -1,6 +1,6 @@
 # Display one ordinary running Codex session
 
-Status: ready-for-human
+Status: resolved
 Blocked by: none
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -44,7 +44,7 @@ updates once after polling detects later Codex activity.
 - [x] Paths, application-data discovery, and process/transport choices contain
       no macOS-only assumptions; unsupported evidence fails visibly on Windows,
       macOS, or Linux rather than being guessed.
-- [ ] A maintainer has personally started an ordinary Codex TUI first, run
+- [x] A maintainer has personally started an ordinary Codex TUI first, run
       `npm run packwalk`, and observed the real initial view and a later
       persisted polling update.
 
@@ -119,3 +119,13 @@ repository-local execution of the package binary is required.
   for a capable 80-column terminal. No agent-verifiable blocker remains. Only
   the maintainer's personal test and subjective visual feedback remain, so the
   personal acceptance criterion stays unchecked.
+- 2026-07-20: The maintainer personally accepted Ticket 01. In one continuously
+  running `npm run packwalk` CLI, the same exact session advanced from source
+  timestamp `2026-07-20T05:21:21.577Z` to
+  `2026-07-20T05:30:29.700Z` without restarting PackWalk; the later update was
+  committed and redrawn in place. Ticket 01 is resolved.
+- 2026-07-20: Non-blocking product feedback is preserved for a separate later
+  readability slice: the six-line singleton display has weak visual hierarchy
+  and makes a newly observed update difficult to notice. That slice will be
+  designed after the multi-session shape exists and does not reopen Ticket 01
+  polling acceptance.
