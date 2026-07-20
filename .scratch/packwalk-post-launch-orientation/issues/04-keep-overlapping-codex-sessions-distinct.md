@@ -510,3 +510,12 @@ sessions overlap, share a repository, or have duplicate display labels.
   Positively identified v2 database/endpoint owner PID 70385 was stopped; v1
   PID 77857 remains alive and untouched. Ticket 04 is claimed only for an
   entirely fresh generic review and independent product preflight.
+- 2026-07-20: Fresh generic review pass 13 is clean across the complete branch
+  from fixed integration point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8`
+  through `6acb970db0cd42e118c8cec924ea85fa817dba28`. Independent Standards and
+  Specification reviewers report zero actionable findings, and a separate
+  storage/platform audit reports zero blockers across filesystem
+  qualification, same-device revalidation, Windows fail-closed behavior,
+  host-selected native tests, retained writer election, transport truth, and
+  crash-successor reopening. Ticket 04 remains claimed only while the
+  independent product preflight runs; no maintainer acceptance is claimed.
