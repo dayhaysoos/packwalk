@@ -629,8 +629,10 @@ generic review returned zero actionable Specification findings and one
 Standards smell. That duplicated v3 table DDL is now one frozen fragment, with
 its pinned migration checksum unchanged. The fifth fresh whole-branch review
 returned zero actionable Standards findings and zero actionable Specification
-findings. Generic code review is clean; independent product preflight remains
-pending.
+findings. The first independent product preflight then returned `NOT READY`
+solely because whole-source loss/recovery and retained one-shot JSON lacked one
+public-seam proof. That deterministic evidence blocker is fixed; fresh generic
+review and a fresh independent product preflight remain pending.
 
 `SessionView` v2 now makes freshness and provenance an explicit closed pair:
 accepted evidence is `fresh`/`Observed`, while last-supported metadata is
@@ -671,10 +673,13 @@ reconnects to one current snapshot without replay. A
 two-session public test proves only the unavailable exact identity changes.
 Injected Windows, macOS, and Linux application-data/endpoint laws remain
 explicit; real transport execution is host-native and native three-platform
-qualification remains Ticket 10. The deterministic suite passes 22 files, 156
+qualification remains Ticket 10. The deterministic suite passes 22 files, 157
 tests, and one intentional host-policy skip; typecheck, lint, build, and diff
 checks pass. The opt-in installed-Codex test passes against this machine's real
 persisted source without starting, resuming, or changing a Codex session.
+The focused nine-file public lifecycle/storage/IPC/CLI suite passes 129 tests,
+including two-session whole-source loss, repeated loss, same-fact recovery,
+reconnect without replay, and actual retained/recovered one-shot JSON.
 Evidence history, deletion, generic migration/backup recovery,
 contention handling, native three-platform qualification, live attachment,
 intervention, and routing remain outside Ticket 05.

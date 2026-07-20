@@ -54,7 +54,7 @@ observed.
   byte-for-byte in a second, commits exact loss as N+1 and same-fact recovery
   as N+2, renders every frame through the production CLI client, and reconnects
   to one current snapshot without replay. A separate two-session test proves
-  only the lost identity changes. The deterministic suite passes 22 files, 156
+  only the lost identity changes. The deterministic suite passes 22 files, 157
   tests, and one intentional host-policy skip; typecheck, lint, build, and diff
   checks pass.
   The opt-in installed-Codex test also passes against this machine's real
@@ -97,3 +97,14 @@ observed.
   Standards findings and zero actionable Specification findings. Generic code
   review is clean. Independent product preflight remains required before this
   ticket can be resolved and integrated.
+- 2026-07-20: The first independent product preflight returned `NOT READY`
+  because whole-source temporary unavailability/recovery and actual retained
+  one-shot JSON lacked one public-seam proof. The existing two-session
+  restartable fixture now proves all rows retain unchanged structural metadata
+  and observation timestamps as `source-unavailable`, receive exactly one
+  monotonic commit each, remain no-ops through repeated loss/reconnect, recover
+  the same facts once as observed, and reconnect without replay. Production
+  one-shot JSON serializes both the retained and recovered snapshots exactly.
+  The nine-file focused public suite passes 129 tests; full verification passes
+  157 tests plus one intentional skip; the installed-Codex test remains green.
+  Fresh generic review and a fresh independent preflight are required.

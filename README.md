@@ -161,8 +161,8 @@ The maintainer accepted the corrected Ticket 01 real-session presentation and
 reconnect recovery after one continuously running CLI kept the same exact
 session and redrew a later committed source timestamp in place. Ticket 04's
 multi-session shape is resolved and integrated. Ticket 05's durable restoration
-and retained-evidence implementation has a clean generic review and is awaiting
-independent product preflight. The view
+and retained-evidence implementation has addressed its first product-preflight
+evidence blocker and is returning through fresh review/preflight gates. The view
 still has non-blocking visual-hierarchy feedback for a separate readability
 slice. See [current state](docs/current-state.md), [Ticket
 01](.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md),

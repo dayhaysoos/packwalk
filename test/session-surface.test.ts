@@ -1109,6 +1109,167 @@ it.effect("restores, degrades, recovers, and reconnects without invented replay"
   }),
 )
 
+it.effect("retains every session through whole-source loss and one-shot JSON recovery", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(2_000)
+    const secondSessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ac"
+    const packWalk = yield* makeRestartableDeterministicPackWalk([
+      {
+        version: 1,
+        sessionId,
+        projectIdentity: "first-project",
+        sourceUpdatedAtMs: 1_000,
+      },
+      {
+        version: 1,
+        sessionId: secondSessionId,
+        projectIdentity: "second-project",
+        sourceUpdatedAtMs: 1_500,
+      },
+    ])
+
+    const firstScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void))
+    yield* packWalk.startDaemonIn(firstScope)
+    const firstObserved = yield* Deferred.make<void>()
+    const firstRun = yield* packWalk.events.pipe(
+      Stream.tap(() => Deferred.succeed(firstObserved, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+    yield* Deferred.await(firstObserved)
+    yield* TestClock.adjust("1 second")
+    const baselineEvents = Array.from(yield* Fiber.join(firstRun))
+    expect(baselineEvents[1]).toMatchObject({
+      _tag: "SessionsUpdated",
+      views: [
+        { sessionId, commitSequence: 3, observedAtMs: 3_000 },
+        {
+          sessionId: secondSessionId,
+          commitSequence: 4,
+          observedAtMs: 3_000,
+        },
+      ],
+    })
+    yield* Scope.close(firstScope, Exit.void)
+
+    yield* packWalk.loseSourceForTest
+    const secondScope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void))
+    yield* packWalk.startDaemonIn(secondScope)
+
+    const readJsonSnapshot = () =>
+      Effect.gen(function* () {
+        const events = yield* Ref.make<ReadonlyArray<SessionEvent>>([])
+        const documents = yield* Ref.make<ReadonlyArray<string>>([])
+        const client: OneShotClientPort = {
+          writeDocument: (document) =>
+            Ref.update(documents, (written) => [...written, document]),
+        }
+        yield* runOneShotSessionClient(
+          packWalk.events.pipe(
+            Stream.tap((event) =>
+              Ref.update(events, (observed) => [...observed, event]),
+            ),
+          ),
+          client,
+          { format: "json", lineSeparator: "\n" },
+        )
+        const event = (yield* Ref.get(events))[0]
+        const document = (yield* Ref.get(documents))[0]
+        if (event === undefined || document === undefined) {
+          return yield* Effect.die("Expected one one-shot JSON snapshot")
+        }
+        expect(JSON.parse(document)).toEqual(event)
+        return { event, document }
+      })
+
+    const retained = yield* readJsonSnapshot()
+    expect(retained.event).toEqual({
+      _tag: "SessionsSnapshot",
+      protocolVersion: 3,
+      views: [
+        {
+          protocolVersion: 2,
+          sessionId,
+          projectIdentity: "first-project",
+          activity: "persisted Codex activity",
+          evidenceSource: "codex-sqlite-thread-index",
+          state: { _tag: "Polled" },
+          freshness: "stale",
+          provenance: {
+            _tag: "Retained",
+            reason: "source-unavailable",
+          },
+          sourceUpdatedAtMs: 1_000,
+          observedAtMs: 3_000,
+          commitSequence: 5,
+        },
+        {
+          protocolVersion: 2,
+          sessionId: secondSessionId,
+          projectIdentity: "second-project",
+          activity: "persisted Codex activity",
+          evidenceSource: "codex-sqlite-thread-index",
+          state: { _tag: "Polled" },
+          freshness: "stale",
+          provenance: {
+            _tag: "Retained",
+            reason: "source-unavailable",
+          },
+          sourceUpdatedAtMs: 1_500,
+          observedAtMs: 3_000,
+          commitSequence: 6,
+        },
+      ],
+    })
+
+    const repeatedLoss = yield* readJsonSnapshot()
+    expect(repeatedLoss).toEqual(retained)
+
+    yield* TestClock.setTime(6_000)
+    yield* packWalk.restoreSourceForTest
+    const recovered = yield* readJsonSnapshot()
+    expect(recovered.event).toEqual({
+      _tag: "SessionsSnapshot",
+      protocolVersion: 3,
+      views: [
+        {
+          protocolVersion: 2,
+          sessionId,
+          projectIdentity: "first-project",
+          activity: "persisted Codex activity",
+          evidenceSource: "codex-sqlite-thread-index",
+          state: { _tag: "Polled" },
+          freshness: "fresh",
+          provenance: { _tag: "Observed" },
+          sourceUpdatedAtMs: 1_000,
+          observedAtMs: 6_000,
+          commitSequence: 7,
+        },
+        {
+          protocolVersion: 2,
+          sessionId: secondSessionId,
+          projectIdentity: "second-project",
+          activity: "persisted Codex activity",
+          evidenceSource: "codex-sqlite-thread-index",
+          state: { _tag: "Polled" },
+          freshness: "fresh",
+          provenance: { _tag: "Observed" },
+          sourceUpdatedAtMs: 1_500,
+          observedAtMs: 6_000,
+          commitSequence: 8,
+        },
+      ],
+    })
+
+    const reconnect = yield* readJsonSnapshot()
+    expect(reconnect).toEqual(recovered)
+    yield* Scope.close(secondScope, Exit.void)
+  }),
+)
+
 it.effect("retains regressed discovery across restart and CLI reconnect", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
