@@ -111,9 +111,8 @@ remaining evidence is the maintainer-started default-TUI snapshot documented in
 the ticket. No production code or `watched` state was added.
 
 [Ticket 03](../.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
-is temporarily reclaimed on `agent/ticket-03-text-json-output` from integration
-fixed point `6c4686dca30466b52db56785ef159348a28a4d1e` for final delivery-record
-reconciliation after product preflight.
+is resolved on `agent/ticket-03-text-json-output` from integration fixed point
+`6c4686dca30466b52db56785ef159348a28a4d1e` and is ready to integrate.
 `packwalk text` and `packwalk json` consume exactly the same initial public
 daemon event as the refreshing CLI, emit one
 platform-native-line-ended document, and exit without affecting the daemon.
@@ -194,6 +193,14 @@ explicitly historical. Ticket 03 remains reclaimed until full verification and
 a fresh independent review confirm that documentation repair. Full verification
 again passes 19 files and 77 tests plus typecheck, lint, and build; only the
 fresh review remains.
+Fresh generic review pass 10 is clean with zero actionable Standards and zero
+Ticket 03 Specification findings through
+`3992844c15bc0838381991ab55278f0166662059`. Fresh independent product
+preflight on that exact commit again reports `READY FOR MAINTAINER` after
+reproducing the public quiet commands. Ticket 03 is resolved for integration.
+Real product execution remains macOS arm64 only; deterministic Windows and
+Linux evidence is reserved for Ticket 10. No personal maintainer acceptance is
+claimed.
 
 ## Reproduce
 
@@ -244,8 +251,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Finish Ticket 03's delivery-record review, integrate it, then continue with
-   Tickets 04–10 in dependency order, including a
+2. Integrate resolved Ticket 03, then continue with Tickets 04–10 in dependency
+   order, including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check
