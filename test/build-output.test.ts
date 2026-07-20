@@ -19,7 +19,9 @@ import { deriveRuntimePaths } from "../src/adapters/runtime-paths.js"
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
 const commandTimeoutMs = 30_000
+const gracefulKillWaitMs = 1_000
 const forceKillDelayMs = 2_000
+const taskkillTimeoutMs = 5_000
 
 interface ProcessResult {
   readonly exitCode: number | null
@@ -27,29 +29,245 @@ interface ProcessResult {
   readonly stderr: string
 }
 
-const terminateProcessTree = (
+const delay = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+const hasExited = (child: ChildProcess): boolean =>
+  child.exitCode !== null || child.signalCode !== null
+
+const waitForExit = async (
   child: ChildProcess,
+  timeoutMs: number,
+): Promise<boolean> => {
+  if (hasExited(child)) return true
+
+  return await new Promise<boolean>((resolve) => {
+    const onClose = (): void => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    const timer = setTimeout(() => {
+      child.off("close", onClose)
+      resolve(hasExited(child))
+    }, timeoutMs)
+    child.once("close", onClose)
+  })
+}
+
+const processGroupExists = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ESRCH"
+    ) {
+      return false
+    }
+    throw error
+  }
+}
+
+const waitForProcessGroupExit = async (
+  pid: number,
+  timeoutMs: number,
+): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!processGroupExists(pid)) return true
+    await delay(25)
+  }
+  return !processGroupExists(pid)
+}
+
+const signalProcessGroup = (
+  pid: number,
   signal: "SIGTERM" | "SIGKILL",
 ): void => {
-  const pid = child.pid
-  if (pid === undefined) return
-
-  if (process.platform === "win32") {
-    const killer = spawn(
-      "taskkill",
-      ["/pid", String(pid), "/T", "/F"],
-      { stdio: "ignore", windowsHide: true },
-    )
-    killer.once("error", () => undefined)
-    killer.unref()
-    return
-  }
-
   try {
     process.kill(-pid, signal)
-  } catch {
-    child.kill(signal)
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ESRCH"
+    ) {
+      return
+    }
+    throw error
   }
+}
+
+interface TaskkillResult {
+  readonly exitCode: number | null
+  readonly spawnError?: Error
+}
+
+const runTaskkill = async (
+  pid: number,
+  force: boolean,
+): Promise<TaskkillResult> => {
+  const args = ["/pid", String(pid), "/T"]
+  if (force) args.push("/F")
+  const taskkill = spawn("taskkill", args, {
+    stdio: "ignore",
+    windowsHide: true,
+  })
+  const completion = new Promise<TaskkillResult>((resolve) => {
+    taskkill.once("error", (error) => resolve({ exitCode: null, spawnError: error }))
+    taskkill.once("close", (exitCode) => resolve({ exitCode }))
+  })
+  const outcome = await Promise.race([
+    completion.then((result) => ({ _tag: "Complete" as const, result })),
+    delay(taskkillTimeoutMs).then(() => ({ _tag: "Timeout" as const })),
+  ])
+  if (outcome._tag === "Complete") return outcome.result
+
+  taskkill.kill("SIGKILL")
+  if (!(await waitForExit(taskkill, forceKillDelayMs))) {
+    throw new Error("Windows process-tree cleanup command did not exit")
+  }
+  throw new Error("Windows process-tree cleanup command timed out")
+}
+
+const terminateWindowsProcessTree = async (
+  child: ChildProcess,
+  pid: number,
+): Promise<void> => {
+  if (hasExited(child)) return
+
+  const graceful = await runTaskkill(pid, false)
+  if (graceful.spawnError === undefined && graceful.exitCode === 0) {
+    if (await waitForExit(child, forceKillDelayMs)) return
+    throw new Error("Windows process-tree owner did not close")
+  }
+  if (hasExited(child)) return
+
+  const forced = await runTaskkill(pid, true)
+  if (forced.spawnError !== undefined || forced.exitCode !== 0) {
+    throw new Error("Windows process-tree cleanup failed")
+  }
+  if (!(await waitForExit(child, forceKillDelayMs))) {
+    throw new Error("Windows process tree did not exit after forced cleanup")
+  }
+}
+
+const terminatePosixProcessTree = async (
+  child: ChildProcess,
+  pid: number,
+): Promise<void> => {
+  signalProcessGroup(pid, "SIGTERM")
+  if (!(await waitForProcessGroupExit(pid, gracefulKillWaitMs))) {
+    signalProcessGroup(pid, "SIGKILL")
+    if (!(await waitForProcessGroupExit(pid, forceKillDelayMs))) {
+      throw new Error("POSIX process tree did not exit after SIGKILL")
+    }
+  }
+  if (!(await waitForExit(child, forceKillDelayMs))) {
+    throw new Error("POSIX process-tree owner did not close")
+  }
+}
+
+const terminateProcessTree = async (child: ChildProcess): Promise<void> => {
+  const pid = child.pid
+  if (pid === undefined) return
+  if (process.platform === "win32") {
+    await terminateWindowsProcessTree(child, pid)
+    return
+  }
+  await terminatePosixProcessTree(child, pid)
+}
+
+const terminateActiveProcessTrees = async (
+  activeChildren: Set<ChildProcess>,
+): Promise<void> => {
+  const children = Array.from(activeChildren)
+  const outcomes = await Promise.allSettled(
+    children.map((child) => terminateProcessTree(child)),
+  )
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome.status === "fulfilled") {
+      const child = children[index]
+      if (child !== undefined) activeChildren.delete(child)
+    }
+  }
+  const failures = outcomes.filter(
+    (outcome): outcome is PromiseRejectedResult =>
+      outcome.status === "rejected",
+  )
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((failure) => failure.reason),
+      "PackWalk test process-tree cleanup failed",
+    )
+  }
+}
+
+const runBoundedCommand = async (
+  command: string,
+  args: ReadonlyArray<string>,
+  environment: NodeJS.ProcessEnv,
+  activeChildren: Set<ChildProcess>,
+  timeoutMs: number,
+): Promise<ProcessResult> => {
+  const child = spawn(command, args, {
+    cwd: repositoryRoot,
+    detached: process.platform !== "win32",
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  activeChildren.add(child)
+  let stdout = ""
+  let stderr = ""
+  child.stdout.setEncoding("utf8")
+  child.stderr.setEncoding("utf8")
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk
+  })
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk
+  })
+
+  const completion = new Promise<
+    | { readonly _tag: "Complete"; readonly exitCode: number | null }
+    | { readonly _tag: "SpawnError"; readonly error: Error }
+  >((resolve) => {
+    child.once("error", (error) => resolve({ _tag: "SpawnError", error }))
+    child.once("close", (exitCode) =>
+      resolve({ _tag: "Complete", exitCode }),
+    )
+  })
+  const outcome = await Promise.race([
+    completion,
+    delay(timeoutMs).then(() => ({ _tag: "Timeout" as const })),
+  ])
+
+  if (outcome._tag === "Complete") {
+    activeChildren.delete(child)
+    return { exitCode: outcome.exitCode, stdout, stderr }
+  }
+  if (outcome._tag === "SpawnError") {
+    activeChildren.delete(child)
+    throw outcome.error
+  }
+
+  const timeoutError = new Error(
+    `Documented PackWalk command exceeded ${timeoutMs}ms`,
+  )
+  try {
+    await terminateProcessTree(child)
+    activeChildren.delete(child)
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [timeoutError, cleanupError],
+      "Timed-out PackWalk command cleanup failed",
+    )
+  }
+  throw timeoutError
 }
 
 const runDocumentedPackWalk = (
@@ -57,63 +275,13 @@ const runDocumentedPackWalk = (
   environment: NodeJS.ProcessEnv,
   activeChildren: Set<ChildProcess>,
 ): Promise<ProcessResult> =>
-  new Promise((resolve, reject) => {
-    const child = spawn(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["run", "--silent", "packwalk", "--", ...args],
-      {
-        cwd: repositoryRoot,
-        detached: process.platform !== "win32",
-        env: environment,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    )
-    activeChildren.add(child)
-    let stdout = ""
-    let stderr = ""
-    let settled = false
-    let timedOut = false
-    let forceKillTimer: NodeJS.Timeout | undefined
-    const commandTimer = setTimeout(() => {
-      timedOut = true
-      terminateProcessTree(child, "SIGTERM")
-      forceKillTimer = setTimeout(
-        () => terminateProcessTree(child, "SIGKILL"),
-        forceKillDelayMs,
-      )
-    }, commandTimeoutMs)
-    const finish = (): boolean => {
-      if (settled) return false
-      settled = true
-      clearTimeout(commandTimer)
-      if (forceKillTimer !== undefined) clearTimeout(forceKillTimer)
-      activeChildren.delete(child)
-      return true
-    }
-    child.stdout.setEncoding("utf8")
-    child.stderr.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk
-    })
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk
-    })
-    child.once("error", (error) => {
-      if (finish()) reject(error)
-    })
-    child.once("close", (exitCode) => {
-      if (!finish()) return
-      if (timedOut) {
-        reject(
-          new Error(
-            `Documented PackWalk command exceeded ${commandTimeoutMs}ms`,
-          ),
-        )
-        return
-      }
-      resolve({ exitCode, stdout, stderr })
-    })
-  })
+  runBoundedCommand(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    ["run", "--silent", "packwalk", "--", ...args],
+    environment,
+    activeChildren,
+    commandTimeoutMs,
+  )
 
 const closeServer = async (
   server: Server,
@@ -272,10 +440,37 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
     expect(invalid.stderr).toBe(`Usage: packwalk [text|json]${EOL}`)
     expect(connectionCount).toBe(2)
   } finally {
-    for (const child of activeChildren) {
-      terminateProcessTree(child, "SIGKILL")
+    try {
+      await terminateActiveProcessTrees(activeChildren)
+    } finally {
+      await closeServer(server, sockets)
+      rmSync(testRoot, { recursive: true, force: true })
     }
-    await closeServer(server, sockets)
-    rmSync(testRoot, { recursive: true, force: true })
   }
+})
+
+it("terminates a timed-out disposable process tree within its cleanup bound", {
+  timeout: 10_000,
+}, async () => {
+  const activeChildren = new Set<ChildProcess>()
+  const nestedProcess = [
+    'const { spawn } = require("node:child_process");',
+    'spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+    "setInterval(() => {}, 1000);",
+  ].join("")
+
+  try {
+    await expect(
+      runBoundedCommand(
+        process.execPath,
+        ["-e", nestedProcess],
+        process.env,
+        activeChildren,
+        200,
+      ),
+    ).rejects.toThrow("exceeded 200ms")
+  } finally {
+    await terminateActiveProcessTrees(activeChildren)
+  }
+  expect(activeChildren.size).toBe(0)
 })

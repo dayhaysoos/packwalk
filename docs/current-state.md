@@ -119,7 +119,7 @@ platform-native-line-ended document, and exit without affecting the daemon.
 JSON uses the existing strict, versioned `SessionEvent` schema and preserves an
 explicit tagged unavailable result rather than optional session fields. Direct
 Codex or SQLite reads remain outside the client boundary. Deterministic
-verification passes 17 files and 75 tests; a compiled real-product smoke passed
+verification passes 17 files and 76 tests; a compiled real-product smoke passed
 for both available one-shot forms and invalid-argument failure behavior.
 Generic review pass 1 found no Ticket 03 Specification issue and required two
 Standards corrections: CLI argv now passes through a strict Effect Schema, and
@@ -137,6 +137,12 @@ Generic review pass 3 confirmed zero Specification findings and required a
 truthful generic catch-all error plus bounded process-tree cleanup in the new
 regression. Both corrections are implemented with platform-specific termination
 and explicit command/test timeouts, pending full verification and fresh review.
+Generic review pass 4 found the initial cleanup was not itself awaited and
+bounded. The replacement runner now checks and awaits POSIX process-group or
+Windows process-tree termination, preserves failed cleanups for final retry,
+and has a passing disposable nested-process timeout regression. Full
+verification is green at 17 files and 76 tests; another fresh review remains
+required.
 
 ## Reproduce
 

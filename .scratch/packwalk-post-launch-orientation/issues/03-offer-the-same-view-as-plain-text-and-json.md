@@ -75,3 +75,14 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   children for final cleanup, and has an explicit 120-second test budget for
   three builds. Focused tests, typecheck, and lint are green; full verification
   and a fresh review remain required.
+- 2026-07-20: Generic review pass 4 remained clean on Specification and found
+  that the first timeout repair still waited on an unbounded child `close` and
+  did not await or check Windows `taskkill`. The process runner now races every
+  command against its own deadline, awaits a bounded POSIX process-group
+  `SIGTERM` then `SIGKILL` sequence or checked Windows `taskkill /T` then `/F`,
+  independently bounds owner closure, retains failed cleanups for a final
+  awaited retry, and reports cleanup failure. A disposable nested-process
+  regression proves the 200-millisecond timeout path removes the full process
+  group inside a 10-second test budget. Focused tests, typecheck, and lint are
+  green. Focused verification passes 4 files and 20 tests; full verification
+  passes 17 files and 76 tests. A fresh review remains required.
