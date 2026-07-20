@@ -87,13 +87,20 @@ The accepted Ticket 01 slice is published on `main` at
 `integration/full-local-product` starts from that same commit.
 
 [Ticket 02](../.scratch/packwalk-post-launch-orientation/issues/02-attempt-one-post-launch-live-codex-event.md)
-is claimed on `agent/ticket-02-live-event-experiment` with the integration
-commit above as its fixed review point. This is one bounded experiment against
-the installed Codex release: success requires one trustworthy post-launch
-event correlated to the exact ordinary session that was already running.
-Weaker evidence is a complete negative result. Neither outcome by itself adds
-production `watched` status or direct control, and a negative result does not
-block the remaining polling tickets.
+is protocol-negative and waiting on one human-only runtime snapshot on
+`agent/ticket-02-live-event-experiment`. Standalone Codex `0.139.0` on macOS
+arm64 exposes exact-ID notifications only inside the app-server connection that
+owns them. Its request schema has no post-launch attach or subscribe operation,
+and the default TUI embeds an in-process app-server; externally connectable
+surfaces require launch-time `--remote` or a separately managed app-server.
+Those topologies violate the accepted boundary rather than solving it.
+
+No ordinary TUI process was running during the bounded topology check. The
+remaining Ticket 02 evidence is therefore one maintainer-started default TUI
+and a structural process/listener snapshot confirming that it exposes no
+supported endpoint. Until then, the ticket is `needs-info`. Persisted evidence
+remains `discovered` or `polled`; production `watched` status and direct control
+remain unavailable. This human-only check does not block Tickets 03–10.
 
 ## Reproduce
 
@@ -142,9 +149,10 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Complete the bounded Ticket 02 live-event experiment without changing the
-   post-launch lifecycle boundary.
-2. Deliver Tickets 03–10 in dependency order, including a
+1. Review and preflight the bounded Ticket 02 negative report, isolating its
+   one remaining ordinary-TUI topology check.
+2. Continue with Tickets 03–10 in dependency order while that non-blocking
+   human evidence remains open, including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check
