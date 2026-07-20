@@ -1,6 +1,6 @@
 # Offer the same view as plain text and JSON
 
-Status: resolved
+Status: claimed
 Blocked by: 01
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -132,3 +132,12 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   the accumulated Ticket 10 matrix. That limitation is non-blocking for this
   ticket. Ticket 03's agent-owned delivery is resolved and ready to integrate;
   no personal maintainer acceptance is claimed.
+- 2026-07-20: Final generic review pass 9 is clean on Standards and found one
+  documentation-only Specification inconsistency: the opening current-state
+  summary presented intermediate 17-file verification and a pending preflight
+  beside the final 19-file `READY FOR MAINTAINER` result without identifying
+  the former as delivery history. Ticket 03 is temporarily reclaimed while the
+  handoff opening is made authoritative and the intermediate review chronology
+  is explicitly labelled. Product behavior is unchanged; full verification
+  again passes 19 files and 77 tests plus typecheck, lint, and build. Another
+  fresh review remains required.

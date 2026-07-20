@@ -111,16 +111,23 @@ remaining evidence is the maintainer-started default-TUI snapshot documented in
 the ticket. No production code or `watched` state was added.
 
 [Ticket 03](../.scratch/packwalk-post-launch-orientation/issues/03-offer-the-same-view-as-plain-text-and-json.md)
-is resolved on `agent/ticket-03-text-json-output` from integration fixed point
-`6c4686dca30466b52db56785ef159348a28a4d1e` and is ready to integrate.
+is temporarily reclaimed on `agent/ticket-03-text-json-output` from integration
+fixed point `6c4686dca30466b52db56785ef159348a28a4d1e` for final delivery-record
+reconciliation after product preflight.
 `packwalk text` and `packwalk json` consume exactly the same initial public
 daemon event as the refreshing CLI, emit one
 platform-native-line-ended document, and exit without affecting the daemon.
 JSON uses the existing strict, versioned `SessionEvent` schema and preserves an
 explicit tagged unavailable result rather than optional session fields. Direct
-Codex or SQLite reads remain outside the client boundary. Deterministic
-verification passes 17 files and 76 tests; a compiled real-product smoke passed
-for both available one-shot forms and invalid-argument failure behavior.
+Codex or SQLite reads remain outside the client boundary. Final deterministic
+verification passes 19 files and 77 tests plus typecheck, lint, and build. The
+exact documented quiet commands passed against the public daemon on macOS
+arm64, and independent product preflight reports `READY FOR MAINTAINER`.
+
+The paragraphs below are chronological delivery history. Any statement that a
+gate “remains” or is “pending” records the state at that numbered pass, not the
+current Ticket 03 result.
+
 Generic review pass 1 found no Ticket 03 Specification issue and required two
 Standards corrections: CLI argv now passes through a strict Effect Schema, and
 one `OneShot { format }` command owns the shared text/JSON execution path. Those
@@ -179,7 +186,14 @@ full verification passed 19 files and 77 tests plus typecheck, lint, and build.
 Real product execution was on macOS arm64. Windows and Linux currently have
 deterministic contract evidence, including CRLF and Windows paths with spaces;
 their real CI process evidence belongs to Ticket 10. Ticket 03's agent-owned
-delivery is resolved without claiming personal maintainer acceptance.
+delivery reached resolution without claiming personal maintainer acceptance.
+Final generic review pass 9 remained clean on Standards but found the opening
+handoff mixed intermediate and final evidence without labelling the former as
+history. The opening now states the final evidence and this chronology is
+explicitly historical. Ticket 03 remains reclaimed until full verification and
+a fresh independent review confirm that documentation repair. Full verification
+again passes 19 files and 77 tests plus typecheck, lint, and build; only the
+fresh review remains.
 
 ## Reproduce
 
@@ -230,8 +244,8 @@ does not redefine PackWalk as permanently read-only.
 
 1. Keep Ticket 02's exact ordinary-TUI topology snapshot open as non-blocking
    human evidence.
-2. Integrate resolved Ticket 03, then continue with Tickets 04–10 in dependency
-   order, including a
+2. Finish Ticket 03's delivery-record review, integrate it, then continue with
+   Tickets 04–10 in dependency order, including a
    separate readability slice after the multi-session shape exists.
 
 ## Fresh-agent comprehension check
