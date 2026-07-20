@@ -755,6 +755,18 @@ tests, and full verification passes 26 files, 173 tests, and one intentional
 skip plus typecheck, lint, and build. Another wholly fresh generic review
 remains.
 
+Fresh generic review pass 3 reports zero Specification findings and one
+Standards blocker: an accepting endpoint could complete overview connection
+readiness before returning its first validated event, ending the startup
+deadline too early. An accepting-but-silent real-socket regression first failed
+against that behavior. Overview readiness now requires the first decoded
+protocol-v4 event, preserves it in the downstream queue, and fails if the peer
+closes before readiness; only subsequent refreshing remains outside the
+startup deadline. The focused four-file IPC/startup/client suite passes 25
+tests, and full verification passes 26 files, 174 tests, and one intentional
+skip plus typecheck, lint, and build. Another wholly fresh generic review
+remains.
+
 Fresh generic review pass 4 reports zero Specification findings and two
 Standards gaps. A 33-fact protocol page passed the decoder because the fixed
 page size existed only in SQLite, and a well-formed continuation whose
@@ -767,17 +779,10 @@ contract/public/storage suite passes 28 tests, and full verification passes 26
 files, 176 tests, and one intentional skip plus typecheck, lint, and build.
 Another wholly fresh generic review remains.
 
-Fresh generic review pass 3 reports zero Specification findings and one
-Standards blocker: an accepting endpoint could complete overview connection
-readiness before returning its first validated event, ending the startup
-deadline too early. An accepting-but-silent real-socket regression first failed
-against that behavior. Overview readiness now requires the first decoded
-protocol-v4 event, preserves it in the downstream queue, and fails if the peer
-closes before readiness; only subsequent refreshing remains outside the
-startup deadline. The focused four-file IPC/startup/client suite passes 25
-tests, and full verification passes 26 files, 174 tests, and one intentional
-skip plus typecheck, lint, and build. Another wholly fresh generic review
-remains.
+Fresh generic review pass 5 inspected the complete fixed-base diff at
+`3979e32d3879ddf36ae933ca6481326ca9475e2b`. Both Standards and
+Specification report zero actionable findings. No generic review blocker
+remains; independent product preflight is the remaining agent gate.
 
 ## Reproduce
 

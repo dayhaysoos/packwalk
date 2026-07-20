@@ -86,6 +86,16 @@ explains each session status without becoming a second transcript archive.
   passes three tests, and `npm run verify` passes 26 files, 173 tests, and one
   intentional skip plus typecheck, lint, and build. Another wholly fresh
   generic review remains.
+- 2026-07-20: Fresh generic review pass 3 is clean on Specification and found
+  that an accepting endpoint could complete overview connection readiness
+  before returning its first validated event, ending the startup deadline too
+  early. An accepting-but-silent real-socket regression first failed against
+  that behavior. Overview connection readiness now requires the first decoded
+  protocol-v4 event, leaves it queued for the renderer, and fails if the peer
+  closes before readiness; only later refreshes remain outside the startup
+  deadline. The focused four-file IPC/startup/client suite passes 25 tests, and
+  `npm run verify` passes 26 files, 174 tests, and one intentional skip plus
+  typecheck, lint, and build. Another wholly fresh generic review remains.
 - 2026-07-20: Fresh generic review pass 4 is clean on Specification and found
   two Standards gaps. A 33-fact protocol page passed the decoder because the
   fixed page size existed only in SQLite, and a well-formed continuation whose
@@ -97,13 +107,7 @@ explains each session status without becoming a second transcript archive.
   passes 28 tests, and `npm run verify` passes 26 files, 176 tests, and one
   intentional skip plus typecheck, lint, and build. Another wholly fresh
   generic review remains.
-- 2026-07-20: Fresh generic review pass 3 is clean on Specification and found
-  that an accepting endpoint could complete overview connection readiness
-  before returning its first validated event, ending the startup deadline too
-  early. An accepting-but-silent real-socket regression first failed against
-  that behavior. Overview connection readiness now requires the first decoded
-  protocol-v4 event, leaves it queued for the renderer, and fails if the peer
-  closes before readiness; only later refreshes remain outside the startup
-  deadline. The focused four-file IPC/startup/client suite passes 25 tests, and
-  `npm run verify` passes 26 files, 174 tests, and one intentional skip plus
-  typecheck, lint, and build. Another wholly fresh generic review remains.
+- 2026-07-20: Fresh generic review pass 5 inspected the complete fixed-base
+  diff at `3979e32d3879ddf36ae933ca6481326ca9475e2b`. Both Standards and
+  Specification report zero actionable findings. No generic review blocker
+  remains; independent product preflight is the remaining agent gate.
