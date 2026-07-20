@@ -206,9 +206,10 @@ Linux evidence is reserved for Ticket 10. No personal maintainer acceptance is
 claimed.
 
 [Ticket 04](../.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
-is implemented on `agent/ticket-04-overlapping-sessions` from fixed integration
-point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` and remains claimed while its
-review gates run.
+is resolved on `agent/ticket-04-overlapping-sessions` from fixed integration
+point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` and is ready to fast-forward
+into `integration/full-local-product`. No personal maintainer acceptance is
+claimed.
 
 ### Current Ticket 04 contract and evidence
 
@@ -244,11 +245,11 @@ accepting listener is not treated as evidence of a healthy daemon. The repaired
 candidate crosses a two-session Codex SQLite fixture through the real daemon
 and local IPC seam into the CLI formatter. `npm run verify` passes 22 files,
 148 tests, and one intentional host-policy branch skip plus typecheck, lint,
-and build; the opt-in persisted-Codex check passes in 29.19 seconds. Generic
-review pass 13 is clean, and the first product-preflight verification blocker
-is repaired with a deterministic bounded process-group regression. A wholly
-fresh generic review pass 14 is clean with zero Standards and zero
-Specification findings; only fresh independent product preflight remains.
+and build; the opt-in persisted-Codex check passes in 9.68 seconds. The first
+product-preflight verification blocker is repaired with a deterministic
+bounded process-group regression. Fresh generic review pass 14 is clean with
+zero Standards and zero Specification findings, and fresh independent product
+preflight reports `READY FOR MAINTAINER` with no blocker.
 
 ### Ticket 04 delivery chronology
 
@@ -604,6 +605,15 @@ Fresh generic review pass 14 is clean across the complete branch from
 Specification reviewers report zero actionable findings, and the targeted
 process-safety audit reports no blocker. Ticket 04 remains claimed only for a
 fresh independent product preflight; no maintainer acceptance is claimed.
+Fresh independent product preflight on exact head
+`3ce9702fafcfef3e5a4c9009e228b64cc5b9f6dc` reports `READY FOR MAINTAINER`.
+The exact verification command and a second four-worker run pass, installed
+text and JSON return 19 unique exact identities, the real persisted-Codex path
+observes a later polled update in 9.68 seconds, and v1 PID 77857 remains
+untouched. Real product execution is macOS arm64; Windows and Linux remain
+deterministic contract evidence for Ticket 10. Ticket 04 is resolved without
+claiming personal maintainer acceptance; only optional two-TUI presentation
+and in-place-redraw judgment remains.
 Ticket 05's stale/degraded recovery semantics, evidence history, deletion,
 live attachment, intervention, and routing remain outside Ticket 04, and no
 maintainer acceptance is claimed.

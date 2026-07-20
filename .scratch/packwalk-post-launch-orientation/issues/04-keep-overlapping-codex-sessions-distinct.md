@@ -1,6 +1,6 @@
 # Keep overlapping Codex sessions distinct
 
-Status: claimed
+Status: resolved
 Blocked by: 01
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -548,3 +548,15 @@ sessions overlap, share a repository, or have duplicate display labels.
   fail-closed, cross-platform-safe, and leak-visible. Ticket 04 remains claimed
   only for a fresh independent product preflight; no maintainer acceptance is
   claimed.
+- 2026-07-20: Fresh independent product preflight on exact head
+  `3ce9702fafcfef3e5a4c9009e228b64cc5b9f6dc` reports `READY FOR MAINTAINER`
+  with no blocker. The exact four-worker verification passes 22 files and 148
+  tests with one intentional host-policy skip plus typecheck, lint, and build;
+  a second full run explicitly passes both the forced-`EPERM` and descendant
+  cleanup regressions. Installed text and JSON return 19 unique exact
+  identities through the public daemon, the real persisted-Codex check observes
+  a later polled update in 9.68 seconds, and v1 PID 77857 remains untouched.
+  Real product evidence is macOS arm64; Windows and Linux remain deterministic
+  contract evidence for Ticket 10. Ticket 04 is resolved without claiming
+  personal maintainer acceptance. Only the optional two-TUI presentation and
+  in-place-redraw judgment remains for the maintainer.
