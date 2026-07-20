@@ -86,3 +86,11 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   group inside a 10-second test budget. Focused tests, typecheck, and lint are
   green. Focused verification passes 4 files and 20 tests; full verification
   passes 17 files and 76 tests. A fresh review remains required.
+- 2026-07-20: Generic review pass 5 remained clean on Specification and found
+  two final cleanup defects: Windows owner exit was treated as tree-exit proof,
+  and losing deadline timers were not cancelled. Timeout cleanup now always
+  runs and checks `taskkill /T`, escalates to `/F` when graceful owner closure
+  misses its bound, and fails visibly if neither proves tree cleanup. One shared
+  deadline race clears its timer in `finally` for both product commands and
+  cleanup helpers. Focused tests, typecheck, and lint are green; full
+  verification and a fresh review remain required.

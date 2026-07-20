@@ -143,6 +143,11 @@ Windows process-tree termination, preserves failed cleanups for final retry,
 and has a passing disposable nested-process timeout regression. Full
 verification is green at 17 files and 76 tests; another fresh review remains
 required.
+Generic review pass 5 required Windows timeout cleanup to verify the process
+tree even if its owner exits and required losing deadline timers to be cleared.
+The shared deadline helper now clears every timer, and Windows cleanup always
+checks `/T`, escalates to `/F`, and fails visibly without proof. Full
+verification and another fresh review remain required.
 
 ## Reproduce
 

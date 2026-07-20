@@ -32,6 +32,28 @@ interface ProcessResult {
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds))
 
+interface DeadlineExceeded {
+  readonly _tag: "DeadlineExceeded"
+}
+
+const raceWithDeadline = async <A>(
+  completion: Promise<A>,
+  timeoutMs: number,
+): Promise<A | DeadlineExceeded> => {
+  let timer: NodeJS.Timeout | undefined
+  const deadline = new Promise<DeadlineExceeded>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ _tag: "DeadlineExceeded" }),
+      timeoutMs,
+    )
+  })
+  try {
+    return await Promise.race([completion, deadline])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 const hasExited = (child: ChildProcess): boolean =>
   child.exitCode !== null || child.signalCode !== null
 
@@ -103,6 +125,7 @@ const signalProcessGroup = (
 }
 
 interface TaskkillResult {
+  readonly _tag: "TaskkillResult"
   readonly exitCode: number | null
   readonly spawnError?: Error
 }
@@ -118,14 +141,15 @@ const runTaskkill = async (
     windowsHide: true,
   })
   const completion = new Promise<TaskkillResult>((resolve) => {
-    taskkill.once("error", (error) => resolve({ exitCode: null, spawnError: error }))
-    taskkill.once("close", (exitCode) => resolve({ exitCode }))
+    taskkill.once("error", (error) =>
+      resolve({ _tag: "TaskkillResult", exitCode: null, spawnError: error }),
+    )
+    taskkill.once("close", (exitCode) =>
+      resolve({ _tag: "TaskkillResult", exitCode }),
+    )
   })
-  const outcome = await Promise.race([
-    completion.then((result) => ({ _tag: "Complete" as const, result })),
-    delay(taskkillTimeoutMs).then(() => ({ _tag: "Timeout" as const })),
-  ])
-  if (outcome._tag === "Complete") return outcome.result
+  const outcome = await raceWithDeadline(completion, taskkillTimeoutMs)
+  if (outcome._tag === "TaskkillResult") return outcome
 
   taskkill.kill("SIGKILL")
   if (!(await waitForExit(taskkill, forceKillDelayMs))) {
@@ -138,17 +162,21 @@ const terminateWindowsProcessTree = async (
   child: ChildProcess,
   pid: number,
 ): Promise<void> => {
-  if (hasExited(child)) return
-
   const graceful = await runTaskkill(pid, false)
-  if (graceful.spawnError === undefined && graceful.exitCode === 0) {
+  const gracefulSucceeded =
+    graceful.spawnError === undefined && graceful.exitCode === 0
+  if (gracefulSucceeded) {
     if (await waitForExit(child, forceKillDelayMs)) return
-    throw new Error("Windows process-tree owner did not close")
   }
-  if (hasExited(child)) return
 
   const forced = await runTaskkill(pid, true)
   if (forced.spawnError !== undefined || forced.exitCode !== 0) {
+    if (
+      gracefulSucceeded &&
+      (await waitForExit(child, forceKillDelayMs))
+    ) {
+      return
+    }
     throw new Error("Windows process-tree cleanup failed")
   }
   if (!(await waitForExit(child, forceKillDelayMs))) {
@@ -241,10 +269,7 @@ const runBoundedCommand = async (
       resolve({ _tag: "Complete", exitCode }),
     )
   })
-  const outcome = await Promise.race([
-    completion,
-    delay(timeoutMs).then(() => ({ _tag: "Timeout" as const })),
-  ])
+  const outcome = await raceWithDeadline(completion, timeoutMs)
 
   if (outcome._tag === "Complete") {
     activeChildren.delete(child)
