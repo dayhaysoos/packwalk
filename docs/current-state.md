@@ -87,20 +87,22 @@ The accepted Ticket 01 slice is published on `main` at
 `integration/full-local-product` starts from that same commit.
 
 [Ticket 02](../.scratch/packwalk-post-launch-orientation/issues/02-attempt-one-post-launch-live-codex-event.md)
-is protocol-negative and waiting on one human-only runtime snapshot on
-`agent/ticket-02-live-event-experiment`. Standalone Codex `0.139.0` on macOS
-arm64 exposes exact-ID notifications only inside the app-server connection that
-owns them. Its request schema has no post-launch attach or subscribe operation,
-and the default TUI embeds an in-process app-server; externally connectable
-surfaces require launch-time `--remote` or a separately managed app-server.
-Those topologies violate the accepted boundary rather than solving it.
+is `needs-info` on `agent/ticket-02-live-event-experiment`. Static inspection
+of standalone Codex `0.139.0` on macOS arm64 found exact-ID notifications but
+no post-launch attach or subscribe request. Binary symbols distinguish an
+in-process TUI app-server client from a remote client, while documented
+externally connectable surfaces require launch-time `--remote` or a separately
+managed app-server. This narrows the supported protocol surface but does not
+establish the runtime topology of an ordinary default TUI that was already
+running.
 
 No ordinary TUI process was running during the bounded topology check. The
 remaining Ticket 02 evidence is therefore one maintainer-started default TUI
-and a structural process/listener snapshot confirming that it exposes no
-supported endpoint. Until then, the ticket is `needs-info`. Persisted evidence
-remains `discovered` or `polled`; production `watched` status and direct control
-remain unavailable. This human-only check does not block Tickets 03–10.
+and a structural process/listener snapshot determining whether that process
+exposes a supported endpoint correlated to the exact session. Until then, the
+runtime conclusion is unavailable. Persisted evidence remains `discovered` or
+`polled`; production `watched` status and direct control remain unavailable.
+This human-only check does not block Tickets 03–10.
 
 ## Reproduce
 

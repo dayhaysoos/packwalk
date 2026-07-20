@@ -83,17 +83,20 @@ handle. No private desktop IPC endpoint was probed.
 
 ### Current conclusion
 
-The installed standalone release has no supported connection-only path for
-PackWalk to receive a trustworthy post-launch event from an independently
-started default TUI. Persisted SQLite or file-change evidence remains polling
-evidence and cannot produce `watched` status. PackWalk must not expose direct
-control on the strength of the app-server schemas alone.
+Static inspection of the installed standalone release found no app-server
+request that attaches or subscribes to another process's independently started
+default TUI. The documented external connection modes require a different
+launch topology. This evidence does not establish the runtime topology of an
+ordinary default TUI that was already running, because no such process was
+available during the check.
 
-This is a protocol-negative result with one strict acceptance caveat: no
-ordinary TUI process was running during the topology snapshot. Ticket 02 stays
-open until a maintainer starts one ordinary default TUI and the same bounded
-process/listener snapshot confirms that it exposes no supported endpoint. No
-prompt, response, raw payload, command output, or session content is needed.
+The runtime conclusion is therefore unavailable. Ticket 02 stays open until a
+maintainer starts one ordinary default TUI and the bounded structural snapshot
+below determines whether that process exposes any supported endpoint and
+whether it can be correlated to the exact session identity. Persisted SQLite
+or file-change evidence remains polling evidence and cannot produce `watched`
+status. PackWalk must not expose direct control on the strength of static
+schemas or binary symbols alone.
 
 ### Concrete next options
 
@@ -124,7 +127,38 @@ codex app-server generate-ts --experimental --out "$schema_dir/ts"
 codex app-server generate-json-schema --experimental --out "$schema_dir/json"
 rg -n 'thread/(attach|subscribe|resume|loaded/list|unsubscribe)' "$schema_dir"
 find "$schema_dir" -depth -delete
+
+codex_binary=$(readlink "$(command -v codex)")
+shasum -a 256 "$codex_binary"
+nm -nm "$codex_binary" \
+  | rg 'InProcessAppServerClient|RemoteAppServerClient|forward_in_process_event|app_server_session'
+
+ps -axo pid=,ppid=,tty=,comm= \
+  | awk '$3 != "??" && $4 ~ /codex$/ { print }'
+# Replace 12345 with the TUI PID selected from the preceding structural list.
+lsof -nP -a -p 12345 -iTCP -sTCP:LISTEN
+lsof -nP -a -p 12345 -U
+lsof -nP -a -p 12345 -d 0,1,2
+
+node -e 'const { DatabaseSync }=require("node:sqlite"); const db=new DatabaseSync(process.env.HOME+"/.codex/state_5.sqlite",{readOnly:true}); db.exec("PRAGMA query_only=ON"); console.log(db.prepare("SELECT name,type FROM pragma_table_info(?) ORDER BY cid").all("threads")); db.close()'
 ```
+
+The topology commands are read-only but their raw output can contain private
+local paths, terminal names, process identifiers, file descriptors, or socket
+paths. Inspect raw output locally and do not paste or retain it. The public
+report may record only this allowlist:
+
+- standalone Codex version and binary hash;
+- operating system version and architecture;
+- whether exactly one terminal-attached Codex process was present;
+- whether that process exposed any named Unix or TCP listener;
+- whether an endpoint could be correlated to the exact persisted session ID;
+- the relevant schema column names and protocol method names; and
+- the final supported, unsupported, or unavailable conclusion.
+
+Do not record command arguments, absolute paths, PIDs, terminal names, file
+descriptors, raw socket addresses, environment values, SQLite row data, raw
+protocol payloads, prompts, responses, diffs, or command output.
 
 Windows and Linux require separate installed-release and runtime-topology
 qualification. This macOS result makes no claim about either platform.
@@ -136,8 +170,11 @@ qualification. This macOS result makes no claim about either platform.
   experiment will qualify one post-launch event against the installed Codex
   release without changing ordinary session lifecycle. A rigorous negative
   result remains an accepted resolution and will not block Tickets 03–10.
-- 2026-07-20: Local protocol qualification found no eligible post-launch
-  attachment path in standalone Codex `0.139.0`. Ticket 02 is `needs-info`
-  because no ordinary TUI process was available for the final bounded topology
-  snapshot. The exact human-only evidence is isolated above; the remaining
-  polling tickets are not blocked.
+- 2026-07-20: Static protocol inspection found no attach or subscribe request
+  in standalone Codex `0.139.0`. Ordinary-TUI runtime topology remains
+  unverified, so Ticket 02 is `needs-info`. The exact human-only evidence is
+  isolated above; the remaining polling tickets are not blocked.
+- 2026-07-20: Review required the report to stop treating static protocol
+  evidence as a runtime conclusion, remove an undefined extra status label,
+  and document a reproducible, allowlisted topology check. Those
+  documentation findings are corrected without changing product behavior.
