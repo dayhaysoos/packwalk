@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { homedir, tmpdir } from "node:os"
+import { homedir } from "node:os"
 import { posix, win32 } from "node:path"
 
 import {
@@ -15,17 +15,15 @@ import {
 export interface RuntimePathInputs {
   readonly platform: "darwin" | "linux" | "win32"
   readonly homeDirectory: string
-  readonly tempDirectory: string
-  readonly userId?: string
   readonly codexHome?: string
   readonly localAppData?: string
   readonly xdgDataHome?: string
-  readonly xdgRuntimeDirectory?: string
 }
 
 export interface RuntimePathsValue {
   readonly codexDatabasePath: string
   readonly packWalkDataDirectory: string
+  readonly legacyPackWalkDatabasePath: string
   readonly packWalkDatabasePath: string
   readonly ipcDirectory?: string
   readonly ipcEndpoint: string
@@ -35,12 +33,20 @@ export interface RuntimePathsValue {
 // installed client cannot silently connect to a persistent older daemon.
 const sessionIpcNamespace = "v2"
 
-const stableUserToken = (input: RuntimePathInputs): string =>
-  input.userId ??
-  createHash("sha256")
-    .update(input.homeDirectory.toLowerCase())
+const durableDatabaseToken = (
+  path: string,
+  platform: RuntimePathInputs["platform"],
+): string => {
+  const normalized =
+    platform === "win32"
+      ? win32.normalize(path).toLowerCase()
+      : posix.normalize(path)
+
+  return createHash("sha256")
+    .update(normalized)
     .digest("hex")
-    .slice(0, 16)
+    .slice(0, 24)
+}
 
 export const deriveRuntimePaths = (
   input: RuntimePathInputs,
@@ -57,7 +63,6 @@ export const deriveRuntimePaths = (
   if (input.platform === "win32") {
     requireAbsoluteOverride(input.localAppData)
   } else {
-    requireAbsoluteOverride(input.xdgRuntimeDirectory)
     if (input.platform === "linux") {
       requireAbsoluteOverride(input.xdgDataHome)
     }
@@ -70,14 +75,23 @@ export const deriveRuntimePaths = (
       input.localAppData ??
       win32.join(input.homeDirectory, "AppData", "Local")
     const packWalkDataDirectory = win32.join(dataRoot, "PackWalk")
+    const packWalkDatabasePath = win32.join(
+      packWalkDataDirectory,
+      "packwalk-v2.sqlite",
+    )
+    const databaseToken = durableDatabaseToken(
+      packWalkDatabasePath,
+      input.platform,
+    )
     return {
       codexDatabasePath: win32.join(codexHome, "state_5.sqlite"),
       packWalkDataDirectory,
-      packWalkDatabasePath: win32.join(
+      legacyPackWalkDatabasePath: win32.join(
         packWalkDataDirectory,
         "packwalk.sqlite",
       ),
-      ipcEndpoint: `\\\\.\\pipe\\packwalk-${sessionIpcNamespace}-${stableUserToken(input)}`,
+      packWalkDatabasePath,
+      ipcEndpoint: `\\\\.\\pipe\\packwalk-${sessionIpcNamespace}-${databaseToken}`,
     }
   }
 
@@ -90,18 +104,27 @@ export const deriveRuntimePaths = (
     dataRoot,
     input.platform === "darwin" ? "PackWalk" : "packwalk",
   )
+  const packWalkDatabasePath = posix.join(
+    packWalkDataDirectory,
+    "packwalk-v2.sqlite",
+  )
+  const databaseToken = durableDatabaseToken(
+    packWalkDatabasePath,
+    input.platform,
+  )
   const ipcDirectory = posix.join(
-    input.xdgRuntimeDirectory ?? input.tempDirectory,
-    `packwalk-${stableUserToken(input)}`,
+    "/tmp",
+    `packwalk-${sessionIpcNamespace}-${databaseToken}`,
   )
 
   return {
     codexDatabasePath: posix.join(codexHome, "state_5.sqlite"),
     packWalkDataDirectory,
-    packWalkDatabasePath: posix.join(
+    legacyPackWalkDatabasePath: posix.join(
       packWalkDataDirectory,
       "packwalk.sqlite",
     ),
+    packWalkDatabasePath,
     ipcDirectory,
     ipcEndpoint: posix.join(
       ipcDirectory,
@@ -133,10 +156,6 @@ const resolveRuntimePaths = Effect.gen(function* () {
   const xdgDataHome = yield* Config.option(
     Config.nonEmptyString("XDG_DATA_HOME"),
   )
-  const xdgRuntimeDirectory = yield* Config.option(
-    Config.nonEmptyString("XDG_RUNTIME_DIR"),
-  )
-
   return yield* Effect.try({
     try: () => {
       if (!supportedPlatform(process.platform)) {
@@ -147,10 +166,6 @@ const resolveRuntimePaths = Effect.gen(function* () {
         deriveRuntimePaths({
           platform: process.platform,
           homeDirectory: homedir(),
-          tempDirectory: tmpdir(),
-          ...(typeof process.getuid === "function"
-            ? { userId: String(process.getuid()) }
-            : {}),
           ...(Option.isSome(codexHome)
             ? { codexHome: codexHome.value }
             : {}),
@@ -159,9 +174,6 @@ const resolveRuntimePaths = Effect.gen(function* () {
             : {}),
           ...(Option.isSome(xdgDataHome)
             ? { xdgDataHome: xdgDataHome.value }
-            : {}),
-          ...(Option.isSome(xdgRuntimeDirectory)
-            ? { xdgRuntimeDirectory: xdgRuntimeDirectory.value }
             : {}),
         }),
       )

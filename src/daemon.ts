@@ -9,6 +9,7 @@ import {
 import {
   codexSourceLayer,
   layer as sqliteSessionStorageLayer,
+  prepareVersionedStorage,
 } from "./adapters/sqlite-session-storage.js"
 import {
   sessionDaemonLayerFromServer,
@@ -25,6 +26,11 @@ const daemonProgram = Effect.scoped(
     if (endpointClaim._tag === "AlreadyRunning") {
       return
     }
+
+    yield* prepareVersionedStorage(
+      paths.legacyPackWalkDatabasePath,
+      paths.packWalkDatabasePath,
+    )
 
     const dependencies = Layer.mergeAll(
       codexSourceLayer(paths.codexDatabasePath),

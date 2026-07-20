@@ -104,14 +104,9 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
   const runtimePaths = deriveRuntimePaths({
     platform: process.platform,
     homeDirectory,
-    tempDirectory,
-    ...(typeof process.getuid === "function"
-      ? { userId: String(process.getuid()) }
-      : {}),
     codexHome,
     localAppData,
     xdgDataHome: dataDirectory,
-    xdgRuntimeDirectory: runtimeDirectory,
   })
   if (runtimePaths.ipcDirectory !== undefined) {
     mkdirSync(dirname(runtimePaths.ipcEndpoint), { recursive: true })
@@ -213,6 +208,9 @@ it("builds clean output and keeps documented one-shot stdout machine-clean", {
       await terminateActiveProcessTrees(activeChildren)
     } finally {
       await closeServer(server, sockets)
+      if (runtimePaths.ipcDirectory !== undefined) {
+        rmSync(runtimePaths.ipcDirectory, { recursive: true, force: true })
+      }
       rmSync(testRoot, { recursive: true, force: true })
     }
   }

@@ -94,16 +94,10 @@ it.effect("decodes the legacy singleton and current overview IPC variants", () =
     }
 
     const command = yield* decodeStrict(SessionCommand)({
-      _tag: "SubscribeSession",
-      protocolVersion: 1,
-    })
-    expect(command._tag).toBe("SubscribeSession")
-
-    const overviewCommand = yield* decodeStrict(SessionCommand)({
       _tag: "SubscribeSessions",
       protocolVersion: 2,
     })
-    expect(overviewCommand._tag).toBe("SubscribeSessions")
+    expect(command._tag).toBe("SubscribeSessions")
   }),
 )
 
@@ -175,6 +169,7 @@ it.effect("fails closed on unknown, version-mismatched, or content-bearing IPC v
 
     for (const command of [
       { _tag: "UnknownCommand", protocolVersion: 1 },
+      { _tag: "SubscribeSession", protocolVersion: 1 },
       { _tag: "SubscribeSession", protocolVersion: 2 },
       {
         _tag: "SubscribeSession",

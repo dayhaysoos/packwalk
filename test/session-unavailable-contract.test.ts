@@ -84,6 +84,12 @@ it.effect("rejects every mismatched unavailable code and message pair", () =>
         code: "source-unavailable",
         message: ambiguousFailureMessage,
       },
+      {
+        _tag: "SessionUnavailable",
+        protocolVersion: 1,
+        code: "source-ambiguous",
+        message: ambiguousFailureMessage,
+      },
     ] as const
 
     for (const input of mismatchedPairs) {

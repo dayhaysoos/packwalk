@@ -1,4 +1,11 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import {
+  constants as FsConstants,
+  copyFileSync,
+  existsSync,
+  renameSync,
+  rmSync,
+} from "node:fs"
 import { backup, DatabaseSync } from "node:sqlite"
 
 import { Effect, Layer, Schema } from "effect"
@@ -87,6 +94,59 @@ const storageError = (operation: StorageOperation) =>
   new SessionStorageError({
     operation,
     message: storageErrorMessages[operation],
+  })
+
+/** @internal Exported only for the deterministic backup-finalization law. */
+export const completeSqliteBackup = (
+  operation: () => Promise<unknown>,
+): Effect.Effect<void, SessionStorageError> =>
+  Effect.tryPromise({
+    try: operation,
+    catch: () => storageError("SessionStorage.open"),
+  }).pipe(Effect.uninterruptible, Effect.asVoid)
+
+const removeImportStaging = (path: string) =>
+  Effect.forEach(
+    [path, `${path}-journal`, `${path}-wal`, `${path}-shm`],
+    (artifactPath) =>
+      Effect.try({
+        try: () => rmSync(artifactPath, { force: true }),
+        catch: () => storageError("SessionStorage.open"),
+      }),
+    { discard: true },
+  )
+
+const openLegacyImportSource = (path: string) =>
+  Effect.try({
+    try: () => {
+      const database = new DatabaseSync(path, {
+        allowBareNamedParameters: false,
+        allowExtension: false,
+        allowUnknownNamedParameters: false,
+        defensive: true,
+        enableDoubleQuotedStringLiterals: false,
+        enableForeignKeyConstraints: true,
+        readBigInts: false,
+        readOnly: true,
+        returnArrays: false,
+        timeout: 2_000,
+      })
+      try {
+        database.enableDefensive(true)
+        database.enableLoadExtension(false)
+        database.exec("PRAGMA query_only = ON")
+        database.exec("PRAGMA trusted_schema = OFF")
+        return database
+      } catch (error) {
+        try {
+          database.close()
+        } catch {
+          // Acquisition reports the original source configuration failure.
+        }
+        throw error
+      }
+    },
+    catch: () => storageError("SessionStorage.open"),
   })
 
 const sourceError = (
@@ -471,12 +531,14 @@ const initializeFreshSchema = (database: DatabaseSync) =>
 const migrateLegacySingleton = (
   database: DatabaseSync,
   path: string,
+  backupMode: "create" | "retained" = "create",
 ) =>
   Effect.gen(function* () {
-    yield* Effect.tryPromise({
-      try: () => backup(database, `${path}.pre-migration-v2.sqlite`),
-      catch: () => storageError("SessionStorage.open"),
-    })
+    if (backupMode === "create") {
+      yield* completeSqliteBackup(() =>
+        backup(database, `${path}.pre-migration-v2.sqlite`),
+      )
+    }
     yield* runSchemaTransaction(database, () => {
       database.exec(migrateLegacySingletonSql)
       recordCurrentMigration(database)
@@ -543,7 +605,11 @@ const verifyCurrentMigration = Effect.fn("SessionStorage.verifyMigration")(
 )
 
 const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
-  function* (database: DatabaseSync, path: string) {
+  function* (
+    database: DatabaseSync,
+    path: string,
+    legacyBackupMode: "create" | "retained" = "create",
+  ) {
     const schema = yield* inspectStorageSchema(database)
     if (schema === "fresh") {
       yield* initializeFreshSchema(database)
@@ -551,12 +617,160 @@ const prepareStorageSchema = Effect.fn("SessionStorage.prepareSchema")(
     }
     if (schema === "legacy-singleton") {
       yield* validateLegacySingleton(database)
-      yield* migrateLegacySingleton(database, path)
+      yield* migrateLegacySingleton(database, path, legacyBackupMode)
       return
     }
     yield* verifyCurrentMigration(database)
   },
 )
+
+const openImportStagingDatabase = (path: string) =>
+  Effect.try({
+    try: () => {
+      const database = new DatabaseSync(path, {
+        allowBareNamedParameters: false,
+        allowExtension: false,
+        allowUnknownNamedParameters: false,
+        defensive: true,
+        enableDoubleQuotedStringLiterals: false,
+        enableForeignKeyConstraints: true,
+        readBigInts: false,
+        returnArrays: false,
+        timeout: 2_000,
+      })
+
+      try {
+        database.enableDefensive(true)
+        database.enableLoadExtension(false)
+        database.exec("PRAGMA foreign_keys = ON")
+        database.exec("PRAGMA journal_mode = DELETE")
+        database.exec("PRAGMA synchronous = FULL")
+        database.exec("PRAGMA busy_timeout = 2000")
+        database.exec("PRAGMA trusted_schema = OFF")
+
+        const settings = database
+          .prepare(`
+            SELECT
+              (SELECT foreign_keys FROM pragma_foreign_keys) AS foreign_keys,
+              (SELECT journal_mode FROM pragma_journal_mode) AS journal_mode,
+              (SELECT synchronous FROM pragma_synchronous) AS synchronous,
+              (SELECT timeout FROM pragma_busy_timeout) AS busy_timeout,
+              (SELECT trusted_schema FROM pragma_trusted_schema) AS trusted_schema
+          `)
+          .get()
+
+        if (
+          settings?.foreign_keys !== 1 ||
+          settings.journal_mode !== "delete" ||
+          settings.synchronous !== 2 ||
+          settings.busy_timeout !== 2_000 ||
+          settings.trusted_schema !== 0
+        ) {
+          throw new Error("SQLite import settings could not be verified")
+        }
+
+        return database
+      } catch (error) {
+        try {
+          database.close()
+        } catch {
+          // Acquisition reports the original import setup failure.
+        }
+        throw error
+      }
+    },
+    catch: () => storageError("SessionStorage.open"),
+  })
+
+const inspectImportSnapshot = (path: string) =>
+  Effect.acquireUseRelease(
+    openLegacyImportSource(path),
+    (database) =>
+      Effect.gen(function* () {
+        const schema = yield* inspectStorageSchema(database)
+        if (schema === "legacy-singleton") {
+          yield* validateLegacySingleton(database)
+        } else if (schema === "current") {
+          yield* verifyCurrentMigration(database)
+        }
+        return schema
+      }),
+    (database) => Effect.sync(() => database.close()),
+  )
+
+/**
+ * Seeds the versioned database from a SQLite-consistent legacy snapshot.
+ * The caller must first own the versioned daemon endpoint so only one startup
+ * can perform the missing-database import at a time.
+ */
+export const prepareVersionedStorage = Effect.fn(
+  "SessionStorage.prepareVersionedStorage",
+)(function* (legacyPath: string, currentPath: string) {
+  if (existsSync(currentPath) || !existsSync(legacyPath)) {
+    return
+  }
+
+  const importToken = randomUUID()
+  const stagingPath = `${currentPath}.import-${importToken}`
+  const retainedBackupPath = `${currentPath}.pre-migration-v2.sqlite`
+  const retainedBackupStagingPath = `${retainedBackupPath}.import-${importToken}`
+
+  yield* Effect.acquireUseRelease(
+    Effect.succeed(stagingPath),
+    () =>
+      Effect.gen(function* () {
+        yield* Effect.acquireUseRelease(
+          openLegacyImportSource(legacyPath),
+          (legacyDatabase) =>
+            completeSqliteBackup(() => backup(legacyDatabase, stagingPath)),
+          (legacyDatabase) => Effect.sync(() => legacyDatabase.close()),
+        )
+
+        const importedSchema = yield* inspectImportSnapshot(stagingPath)
+        if (importedSchema === "legacy-singleton") {
+          if (existsSync(retainedBackupPath)) {
+            const retainedSchema = yield* inspectImportSnapshot(
+              retainedBackupPath,
+            )
+            if (retainedSchema !== "legacy-singleton") {
+              return yield* storageError("SessionStorage.open")
+            }
+          } else {
+            yield* Effect.try({
+              try: () => {
+                // The source is a closed standalone node:sqlite backup, not a
+                // live database main file with uncheckpointed sidecars.
+                copyFileSync(
+                  stagingPath,
+                  retainedBackupStagingPath,
+                  FsConstants.COPYFILE_EXCL,
+                )
+                renameSync(retainedBackupStagingPath, retainedBackupPath)
+              },
+              catch: () => storageError("SessionStorage.open"),
+            })
+          }
+        }
+
+        yield* Effect.acquireUseRelease(
+          openImportStagingDatabase(stagingPath),
+          (database) =>
+            prepareStorageSchema(database, stagingPath, "retained"),
+          (database) => Effect.sync(() => database.close()),
+        )
+
+        yield* Effect.try({
+          try: () => renameSync(stagingPath, currentPath),
+          catch: () => storageError("SessionStorage.open"),
+        })
+      }),
+    () =>
+      Effect.gen(function* () {
+        yield* removeImportStaging(stagingPath)
+        yield* removeImportStaging(retainedBackupStagingPath)
+      }),
+  )
+})
 
 const openConfiguredDatabase = (path: string) =>
   Effect.try({

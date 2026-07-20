@@ -67,3 +67,32 @@ sessions overlap, share a repository, or have duplicate display labels.
   process-tree cleanup at the default machine-wide fan-out; two consecutive
   complete test runs and `npm run verify` are green. Only fresh review gates
   remain.
+- 2026-07-20: Generic review pass 1 found two actionable version-boundary
+  defects. The v2 endpoint still accepted a v1 subscription and the v2 client
+  still decoded a v1 singleton event, permitting a false cross-version result.
+  Separately, v1 and v2 endpoints could leave two daemons writing the same
+  `packwalk.sqlite`, violating the single-writer boundary when v2 migrated the
+  table out from under v1. Ticket 04 remains claimed while both defects receive
+  deterministic regressions and fixes; fresh full verification and a wholly
+  new generic review pass are required afterward.
+- 2026-07-20: Review pass 1's blockers and the follow-up storage audit are
+  repaired. The production command, server, client, and surface schemas are
+  protocol-v2-only and reject cross-version frames in both directions. V2 now
+  owns `packwalk-v2.sqlite`; it snapshots a still-active legacy WAL database
+  only after claiming an endpoint derived from the normalized durable database
+  path, so launch-time runtime-directory differences cannot split writer
+  authority. Import keeps the legacy database writable, retains a checked
+  pre-migration snapshot, migrates a rollback-journal staging database, and
+  atomically promotes it. Backup completion is uninterruptible, handled
+  failures clean their staging files, and an existing retained backup resumes
+  a crash-interrupted startup rather than wedging it. Focused verification
+  passes 37 tests and `npm run verify` passes 21 files and 92 tests plus
+  typecheck, lint, and build. The opt-in persisted-Codex polling check passed in
+  8.23 seconds. The compiled product then upgraded beside the machine's
+  untouched protocol-v1 daemon: text and JSON exited zero with empty stderr,
+  all 19 exact identities appeared, and a later persisted update advanced only
+  this task's exact row while the other 18 serialized hashes stayed unchanged.
+  The test-started v2 daemon was stopped by its verified endpoint-owning PID;
+  the pre-existing v1 daemon remained running. Ticket 04 stays claimed only
+  for a wholly fresh generic review and independent product preflight; no
+  maintainer acceptance is claimed.

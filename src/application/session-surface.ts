@@ -25,6 +25,7 @@ import {
   matchSessionTransitionTrigger,
   type IllegalSessionTransition,
   SessionEvent,
+  SessionProtocolEvent,
   SessionTransitionTrigger,
   type CodexPersistedFact,
   type SessionIdentity,
@@ -33,7 +34,7 @@ import {
 } from "../domain/session.js"
 
 export interface Interface {
-  readonly events: Stream.Stream<SessionEvent>
+  readonly events: Stream.Stream<SessionProtocolEvent>
   readonly refresh: () => Effect.Effect<void>
   readonly runPolling: Effect.Effect<never, IllegalSessionTransition>
 }
@@ -44,7 +45,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 interface SessionEventEnvelope {
   readonly revision: number
-  readonly event: SessionEvent
+  readonly event: SessionProtocolEvent
 }
 
 type NonEmptyReadonlyArray<A> = readonly [A, ...Array<A>]
@@ -61,27 +62,27 @@ const sourceUnavailableEvent = (
     | "source-incompatible"
     | "source-unavailable"
     | "source-ambiguous",
-): SessionEvent =>
+): SessionProtocolEvent =>
   code === "source-ambiguous"
-    ? SessionEvent.cases.SessionUnavailable.make({
+    ? SessionProtocolEvent.cases.SessionUnavailable.make({
         protocolVersion: 2,
         code,
         message: "PackWalk found ambiguous Codex persisted evidence",
       })
-    : SessionEvent.cases.SessionUnavailable.make({
+    : SessionProtocolEvent.cases.SessionUnavailable.make({
         protocolVersion: 2,
         code,
         message: "PackWalk could not read supported Codex persisted evidence",
       })
 
-const storageUnavailableEvent = (): SessionEvent =>
-  SessionEvent.cases.SessionUnavailable.make({
+const storageUnavailableEvent = (): SessionProtocolEvent =>
+  SessionProtocolEvent.cases.SessionUnavailable.make({
     protocolVersion: 2,
     code: "storage-unavailable",
     message: "PackWalk could not commit its current session view",
   })
 
-const sourceErrorEvent = (error: SessionSourceError): SessionEvent => {
+const sourceErrorEvent = (error: SessionSourceError): SessionProtocolEvent => {
   switch (error.code) {
     case "unavailable":
       return sourceUnavailableEvent("source-unavailable")
@@ -93,19 +94,15 @@ const sourceErrorEvent = (error: SessionSourceError): SessionEvent => {
   }
 }
 
-const asCurrentSnapshot = (event: SessionEvent): SessionEvent => {
+const asCurrentSnapshot = (
+  event: SessionProtocolEvent,
+): SessionProtocolEvent => {
   switch (event._tag) {
-    case "SessionUpdated":
-      return SessionEvent.cases.SessionSnapshot.make({
-        protocolVersion: 1,
-        view: event.view,
-      })
     case "SessionsUpdated":
       return SessionEvent.cases.SessionsSnapshot.make({
         protocolVersion: 2,
         views: event.views,
       })
-    case "SessionSnapshot":
     case "SessionsSnapshot":
     case "SessionUnavailable":
       return event
@@ -134,7 +131,7 @@ const publicEvents = (
 
 const makeEventState = Effect.fn("SessionSurface.makeEventState")(
   function* (
-    initialEvent: SessionEvent,
+    initialEvent: SessionProtocolEvent,
     initialSnapshot: SessionStorageSnapshot,
   ) {
     const current = yield* Ref.make<SessionEventEnvelope>({
@@ -147,7 +144,7 @@ const makeEventState = Effect.fn("SessionSurface.makeEventState")(
       PubSub.shutdown,
     )
     const publish = Effect.fn("SessionSurface.publish")(function* (
-      event: SessionEvent,
+      event: SessionProtocolEvent,
       nextSnapshot?: SessionStorageSnapshot,
     ) {
       if (nextSnapshot !== undefined) {
@@ -293,7 +290,7 @@ const reduceObservation = Effect.fn("SessionSurface.reduceObservation")(
 
 const snapshotEvent = (
   views: NonEmptyReadonlyArray<SessionView>,
-): SessionEvent =>
+): SessionProtocolEvent =>
   SessionEvent.cases.SessionsSnapshot.make({
     protocolVersion: 2,
     views,
@@ -301,7 +298,7 @@ const snapshotEvent = (
 
 const updatedEvent = (
   decision: ObservationDecision,
-): SessionEvent => {
+): SessionProtocolEvent => {
   const firstChanged = decision.changedSessionIds[0]
   if (firstChanged === undefined) return snapshotEvent(decision.views)
 

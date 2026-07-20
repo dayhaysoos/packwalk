@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto"
 
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Option, Stream } from "effect"
+import { Effect, Layer, Stream } from "effect"
 
 import { connectSessionEvents } from "../src/adapters/local-session-ipc.js"
 import {
@@ -41,31 +41,48 @@ it.live("observes one later persisted update from an ordinary existing Codex ses
       Effect.flatMap((stream) =>
         stream.pipe(
           Stream.mapAccum(
-            () => Option.none<number>(),
+            () => new Map<string, number>(),
             (
-              initialSourceUpdatedAtMs,
+              initialSourceUpdatedAtMsBySession,
               event,
             ): readonly [
-              Option.Option<number>,
+              ReadonlyMap<string, number>,
               ReadonlyArray<{
                 readonly event: typeof event
-                readonly isLaterPersistedUpdate: boolean
+                readonly updatedSessionId: string | undefined
               }>,
             ] => {
               const initial =
-                Option.isNone(initialSourceUpdatedAtMs) &&
-                event._tag === "SessionSnapshot"
-                  ? Option.some(event.view.sourceUpdatedAtMs)
-                  : initialSourceUpdatedAtMs
-              const isLaterPersistedUpdate =
-                Option.isSome(initial) &&
-                event._tag === "SessionUpdated" &&
-                event.view.sourceUpdatedAtMs > initial.value
+                initialSourceUpdatedAtMsBySession.size === 0 &&
+                event._tag === "SessionsSnapshot"
+                  ? new Map(
+                      event.views.map((view) => [
+                        view.sessionId as string,
+                        view.sourceUpdatedAtMs,
+                      ]),
+                    )
+                  : initialSourceUpdatedAtMsBySession
+              const updatedSessionId =
+                event._tag === "SessionsUpdated"
+                  ? event.changedSessionIds.find((sessionId) => {
+                      const initialSourceUpdatedAtMs = initial.get(sessionId)
+                      const updatedView = event.views.find(
+                        (view) => view.sessionId === sessionId,
+                      )
+                      return (
+                        initialSourceUpdatedAtMs !== undefined &&
+                        updatedView !== undefined &&
+                        updatedView.sourceUpdatedAtMs > initialSourceUpdatedAtMs
+                      )
+                    })
+                  : undefined
 
-              return [initial, [{ event, isLaterPersistedUpdate }]]
+              return [initial, [{ event, updatedSessionId }]]
             },
           ),
-          Stream.takeUntil((observation) => observation.isLaterPersistedUpdate),
+          Stream.takeUntil(
+            (observation) => observation.updatedSessionId !== undefined,
+          ),
           Stream.runCollect,
         ),
       ),
@@ -81,27 +98,39 @@ it.live("observes one later persisted update from an ordinary existing Codex ses
     )
     const collected = Array.from(observations)
     const initial = collected[0]?.event
-    const update = collected.at(-1)?.event
+    const updateObservation = collected.at(-1)
+    const update = updateObservation?.event
 
-    expect(initial?._tag).toBe("SessionSnapshot")
-    expect(update?._tag).toBe("SessionUpdated")
+    expect(initial?._tag).toBe("SessionsSnapshot")
+    expect(update?._tag).toBe("SessionsUpdated")
     if (
-      initial?._tag !== "SessionSnapshot" ||
-      update?._tag !== "SessionUpdated"
+      initial?._tag !== "SessionsSnapshot" ||
+      update?._tag !== "SessionsUpdated" ||
+      updateObservation === undefined ||
+      updateObservation.updatedSessionId === undefined
     ) {
       return
     }
 
-    expect(initial.view.projectIdentity.length > 0).toBe(true)
-    expect(initial.view.sessionId.length > 0).toBe(true)
-    expect(update.view.sessionId === initial.view.sessionId).toBe(true)
-    expect(update.view.commitSequence).toBeGreaterThan(
-      initial.view.commitSequence,
+    const initialView = initial.views.find(
+      (view) => view.sessionId === updateObservation.updatedSessionId,
     )
-    expect(update.view.sourceUpdatedAtMs > initial.view.sourceUpdatedAtMs).toBe(
+    const updatedView = update.views.find(
+      (view) => view.sessionId === updateObservation.updatedSessionId,
+    )
+    expect(initialView).toBeDefined()
+    expect(updatedView).toBeDefined()
+    if (initialView === undefined || updatedView === undefined) return
+
+    expect(initialView.projectIdentity.length > 0).toBe(true)
+    expect(initialView.sessionId.length > 0).toBe(true)
+    expect(updatedView.commitSequence).toBeGreaterThan(
+      initialView.commitSequence,
+    )
+    expect(updatedView.sourceUpdatedAtMs > initialView.sourceUpdatedAtMs).toBe(
       true,
     )
-    expect(update.view.state._tag).toBe("Polled")
+    expect(updatedView.state._tag).toBe("Polled")
   }).pipe(
     Effect.provide(Layer.merge(NodeServices.layer, runtimePathsLayer)),
   ),

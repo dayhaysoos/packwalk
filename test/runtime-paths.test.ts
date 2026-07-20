@@ -12,28 +12,30 @@ describe("PackWalk runtime paths", () => {
     const paths = deriveRuntimePaths({
       platform: "darwin",
       homeDirectory: "/Users/example",
-      tempDirectory: "/tmp",
-      userId: "501",
     })
 
     expect(paths.codexDatabasePath).toBe(
       "/Users/example/.codex/state_5.sqlite",
     )
     expect(paths.packWalkDatabasePath).toBe(
+      "/Users/example/Library/Application Support/PackWalk/packwalk-v2.sqlite",
+    )
+    expect(paths.legacyPackWalkDatabasePath).toBe(
       "/Users/example/Library/Application Support/PackWalk/packwalk.sqlite",
     )
-    expect(paths.ipcEndpoint).toBe("/tmp/packwalk-501/daemon-v2.sock")
-    expect(paths.ipcDirectory).toBe("/tmp/packwalk-501")
+    expect(paths.ipcDirectory).toMatch(
+      /^\/tmp\/packwalk-v2-[a-f0-9]{24}$/,
+    )
+    expect(paths.ipcEndpoint).toBe(
+      `${paths.ipcDirectory}/daemon-v2.sock`,
+    )
   })
 
   it("honors XDG directories on Linux", () => {
     const paths = deriveRuntimePaths({
       platform: "linux",
       homeDirectory: "/home/example",
-      tempDirectory: "/tmp",
-      userId: "1000",
       xdgDataHome: "/home/example/.data",
-      xdgRuntimeDirectory: "/run/user/1000",
       codexHome: "/home/example/codex-home",
     })
 
@@ -41,10 +43,16 @@ describe("PackWalk runtime paths", () => {
       "/home/example/codex-home/state_5.sqlite",
     )
     expect(paths.packWalkDatabasePath).toBe(
+      "/home/example/.data/packwalk/packwalk-v2.sqlite",
+    )
+    expect(paths.legacyPackWalkDatabasePath).toBe(
       "/home/example/.data/packwalk/packwalk.sqlite",
     )
+    expect(paths.ipcDirectory).toMatch(
+      /^\/tmp\/packwalk-v2-[a-f0-9]{24}$/,
+    )
     expect(paths.ipcEndpoint).toBe(
-      "/run/user/1000/packwalk-1000/daemon-v2.sock",
+      `${paths.ipcDirectory}/daemon-v2.sock`,
     )
   })
 
@@ -52,19 +60,69 @@ describe("PackWalk runtime paths", () => {
     const paths = deriveRuntimePaths({
       platform: "win32",
       homeDirectory: "C:\\Users\\example",
-      tempDirectory: "C:\\Temp",
       localAppData: "D:\\LocalData",
       codexHome: "D:\\Codex",
     })
 
     expect(paths.codexDatabasePath).toBe("D:\\Codex\\state_5.sqlite")
     expect(paths.packWalkDatabasePath).toBe(
+      "D:\\LocalData\\PackWalk\\packwalk-v2.sqlite",
+    )
+    expect(paths.legacyPackWalkDatabasePath).toBe(
       "D:\\LocalData\\PackWalk\\packwalk.sqlite",
     )
     expect(paths.ipcEndpoint).toMatch(
-      /^\\\\\.\\pipe\\packwalk-v2-[a-f0-9]{16}$/,
+      /^\\\\\.\\pipe\\packwalk-v2-[a-f0-9]{24}$/,
     )
     expect(paths.ipcDirectory).toBeUndefined()
+  })
+
+  it("uses one Unix endpoint for one durable database across launch homes", () => {
+    const first = deriveRuntimePaths({
+      platform: "linux",
+      homeDirectory: "/home/example",
+      xdgDataHome: "/home/example/.data",
+    })
+    const sameDatabase = deriveRuntimePaths({
+      platform: "linux",
+      homeDirectory: "/different/launch-home",
+      xdgDataHome: "/home/example/.data",
+    })
+    const differentDatabase = deriveRuntimePaths({
+      platform: "linux",
+      homeDirectory: "/home/example",
+      xdgDataHome: "/home/example/other-data",
+    })
+
+    expect(sameDatabase.packWalkDatabasePath).toBe(
+      first.packWalkDatabasePath,
+    )
+    expect(sameDatabase.ipcEndpoint).toBe(first.ipcEndpoint)
+    expect(sameDatabase.ipcDirectory).toBe(first.ipcDirectory)
+    expect(differentDatabase.ipcEndpoint).not.toBe(first.ipcEndpoint)
+    expect(first.ipcDirectory).toMatch(/^\/tmp\/packwalk-v2-[a-f0-9]+$/)
+    expect(first.ipcEndpoint.length).toBeLessThan(100)
+  })
+
+  it("normalizes the durable Windows database identity for its named pipe", () => {
+    const first = deriveRuntimePaths({
+      platform: "win32",
+      homeDirectory: "C:\\Users\\example",
+      localAppData: "D:\\LocalData",
+    })
+    const sameDatabase = deriveRuntimePaths({
+      platform: "win32",
+      homeDirectory: "C:\\DifferentHome",
+      localAppData: "d:/localdata",
+    })
+    const differentDatabase = deriveRuntimePaths({
+      platform: "win32",
+      homeDirectory: "C:\\Users\\example",
+      localAppData: "E:\\LocalData",
+    })
+
+    expect(sameDatabase.ipcEndpoint).toBe(first.ipcEndpoint)
+    expect(differentDatabase.ipcEndpoint).not.toBe(first.ipcEndpoint)
   })
 
   it.each([
@@ -73,16 +131,8 @@ describe("PackWalk runtime paths", () => {
       input: { codexHome: "relative-codex-home" },
     },
     {
-      platform: "darwin" as const,
-      input: { xdgRuntimeDirectory: "relative-runtime" },
-    },
-    {
       platform: "linux" as const,
       input: { xdgDataHome: "relative-data" },
-    },
-    {
-      platform: "linux" as const,
-      input: { xdgRuntimeDirectory: "relative-runtime" },
     },
     {
       platform: "win32" as const,
@@ -100,7 +150,6 @@ describe("PackWalk runtime paths", () => {
           platform,
           homeDirectory:
             platform === "win32" ? "C:\\Users\\example" : "/home/example",
-          tempDirectory: platform === "win32" ? "C:\\Temp" : "/tmp",
           ...input,
         }),
       ).toThrow("Runtime path overrides must be absolute")
@@ -125,7 +174,10 @@ describe("PackWalk runtime paths", () => {
       Effect.provide(runtimePathsLayer),
       Effect.provide(
         ConfigProvider.layer(
-          ConfigProvider.fromUnknown({ CODEX_HOME: codexHome }),
+          ConfigProvider.fromUnknown({
+            CODEX_HOME: codexHome,
+            XDG_RUNTIME_DIR: "ignored-relative-runtime-directory",
+          }),
         ),
       ),
     )

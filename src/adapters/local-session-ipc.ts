@@ -15,16 +15,13 @@ import type * as SocketServer from "effect/unstable/socket/SocketServer"
 
 import {
   MaximumSessionEventBytes,
-  SessionEvent,
-  type SessionEvent as SessionEventValue,
+  SessionProtocolEvent,
+  type SessionProtocolEvent as SessionProtocolEventValue,
 } from "../domain/session.js"
 
 const maximumCommandBytes = 4 * 1024
 
 export const SessionCommand = Schema.TaggedUnion({
-  SubscribeSession: {
-    protocolVersion: Schema.Literal(1),
-  },
   SubscribeSessions: {
     protocolVersion: Schema.Literal(2),
   },
@@ -33,7 +30,7 @@ export const SessionCommand = Schema.TaggedUnion({
 export type SessionCommand = typeof SessionCommand.Type
 
 const SessionCommandJson = Schema.fromJsonString(SessionCommand)
-const SessionEventJson = Schema.fromJsonString(SessionEvent)
+const SessionProtocolEventJson = Schema.fromJsonString(SessionProtocolEvent)
 
 export class LocalIpcError extends Schema.TaggedErrorClass<LocalIpcError>()(
   "PackWalk.LocalIpcError",
@@ -134,7 +131,7 @@ export const makeSessionEventServer = (
 
 const serveClient = (
   socket: import("effect/unstable/socket/Socket").Socket,
-  events: Stream.Stream<SessionEventValue>,
+  events: Stream.Stream<SessionProtocolEventValue>,
   refresh: Effect.Effect<void>,
 ) =>
   Effect.scoped(
@@ -189,7 +186,7 @@ const serveClient = (
 
       yield* events.pipe(
         Stream.runForEach((event) =>
-          Schema.encodeEffect(SessionEventJson)(event).pipe(
+          Schema.encodeEffect(SessionProtocolEventJson)(event).pipe(
             Effect.mapError(() =>
               ipcError(
                 "invalid-frame",
@@ -214,7 +211,7 @@ const serveClient = (
 
 export const runSessionEventServer = (
   server: SessionEventServer,
-  events: Stream.Stream<SessionEventValue>,
+  events: Stream.Stream<SessionProtocolEventValue>,
   refresh: Effect.Effect<void> = Effect.void,
 ): Effect.Effect<never, LocalIpcError> =>
   server
@@ -235,7 +232,7 @@ export const runSessionEventServer = (
 export const connectSessionEvents = (
   endpoint: string,
 ): Effect.Effect<
-  Stream.Stream<SessionEventValue, LocalIpcError>,
+  Stream.Stream<SessionProtocolEventValue, LocalIpcError>,
   LocalIpcError,
   Scope.Scope
 > =>
@@ -245,7 +242,7 @@ export const connectSessionEvents = (
       openTimeout: "1 second",
     })
     const queue = yield* Queue.bounded<
-      SessionEventValue,
+      SessionProtocolEventValue,
       LocalIpcError | Cause.Done
     >(16)
     const opened = yield* Deferred.make<void, LocalIpcError>()
@@ -264,7 +261,7 @@ export const connectSessionEvents = (
         decodeFrames(chunk).pipe(
           Effect.flatMap((lines) =>
             Effect.forEach(lines, (line) =>
-              Schema.decodeUnknownEffect(SessionEventJson, {
+              Schema.decodeUnknownEffect(SessionProtocolEventJson, {
                 onExcessProperty: "error",
               })(line).pipe(
                 Effect.mapError(() =>

@@ -110,49 +110,51 @@ const sourceAmbiguousMessage =
 const storageUnavailableMessage =
   "PackWalk could not commit its current session view" as const
 
-export const SessionEvent = Schema.TaggedUnion({
-  SessionSnapshot: {
-    protocolVersion: Schema.Literal(1),
-    view: SessionView,
-  },
-  SessionUpdated: {
-    protocolVersion: Schema.Literal(1),
-    view: SessionView,
-  },
-  SessionsSnapshot: {
-    protocolVersion: Schema.Literal(2),
-    views: SessionViews,
-  },
-  SessionsUpdated: {
-    protocolVersion: Schema.Literal(2),
-    views: SessionViews,
-    changedSessionIds: ChangedSessionIdentities,
-  },
-  SessionUnavailable: {
-    protocolVersion: Schema.Literals([1, 2]),
-    code: Schema.Literals([
-      "source-ambiguous",
-      "source-incompatible",
-      "source-unavailable",
-      "storage-unavailable",
-    ]),
-    message: Schema.Literals([
-      sourceAmbiguousMessage,
-      sourceUnavailableMessage,
-      storageUnavailableMessage,
-    ]),
-  },
-}).check(
-  Schema.makeFilter((event) => {
+const SessionsSnapshotFields = {
+  protocolVersion: Schema.Literal(2),
+  views: SessionViews,
+} as const
+
+const SessionsUpdatedFields = {
+  protocolVersion: Schema.Literal(2),
+  views: SessionViews,
+  changedSessionIds: ChangedSessionIdentities,
+} as const
+
+const SessionUnavailableCode = Schema.Literals([
+  "source-ambiguous",
+  "source-incompatible",
+  "source-unavailable",
+  "storage-unavailable",
+])
+
+const SessionUnavailableMessage = Schema.Literals([
+  sourceAmbiguousMessage,
+  sourceUnavailableMessage,
+  storageUnavailableMessage,
+])
+
+interface SessionEventConsistencyInput {
+  readonly _tag: string
+  readonly protocolVersion: 1 | 2
+  readonly views?: ReadonlyArray<SessionView>
+  readonly changedSessionIds?: ReadonlyArray<SessionIdentity>
+  readonly code?: typeof SessionUnavailableCode.Type
+  readonly message?: typeof SessionUnavailableMessage.Type
+}
+
+const SessionEventConsistency = Schema.makeFilter<SessionEventConsistencyInput>(
+  (event) => {
     if (event._tag === "SessionsUpdated") {
-      if (event.changedSessionIds.length === 0) {
+      const changedSessionIds = event.changedSessionIds ?? []
+      if (changedSessionIds.length === 0) {
         return "updated session overviews must name at least one changed session"
       }
 
       const viewIdentities = new Set(
-        event.views.map((view) => view.sessionId as string),
+        (event.views ?? []).map((view) => view.sessionId as string),
       )
-      return event.changedSessionIds.every((identity) =>
+      return changedSessionIds.every((identity) =>
           viewIdentities.has(identity)
         )
         ? undefined
@@ -163,20 +165,57 @@ export const SessionEvent = Schema.TaggedUnion({
       return undefined
     }
 
+    if (
+      event.code === "source-ambiguous" &&
+      event.protocolVersion !== 2
+    ) {
+      return "ambiguous session evidence requires protocol version 2"
+    }
+
     const valid =
       event.code === "storage-unavailable"
         ? event.message === storageUnavailableMessage
         : event.code === "source-ambiguous"
           ? event.message === sourceAmbiguousMessage
-        : event.message === sourceUnavailableMessage
+          : event.message === sourceUnavailableMessage
 
     return valid
       ? undefined
       : "session unavailable code and message must describe the same failure"
-  }),
+  },
 )
 
+export const SessionEvent = Schema.TaggedUnion({
+  SessionSnapshot: {
+    protocolVersion: Schema.Literal(1),
+    view: SessionView,
+  },
+  SessionUpdated: {
+    protocolVersion: Schema.Literal(1),
+    view: SessionView,
+  },
+  SessionsSnapshot: SessionsSnapshotFields,
+  SessionsUpdated: SessionsUpdatedFields,
+  SessionUnavailable: {
+    protocolVersion: Schema.Literals([1, 2]),
+    code: SessionUnavailableCode,
+    message: SessionUnavailableMessage,
+  },
+}).check(SessionEventConsistency)
+
 export type SessionEvent = typeof SessionEvent.Type
+
+export const SessionProtocolEvent = Schema.TaggedUnion({
+  SessionsSnapshot: SessionsSnapshotFields,
+  SessionsUpdated: SessionsUpdatedFields,
+  SessionUnavailable: {
+    protocolVersion: Schema.Literal(2),
+    code: SessionUnavailableCode,
+    message: SessionUnavailableMessage,
+  },
+}).check(SessionEventConsistency)
+
+export type SessionProtocolEvent = typeof SessionProtocolEvent.Type
 
 export class IllegalSessionTransition extends Schema.TaggedErrorClass<IllegalSessionTransition>()(
   "PackWalk.IllegalSessionTransition",

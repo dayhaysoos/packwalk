@@ -239,7 +239,30 @@ endpoint. Two same-project exact IDs appeared, one source update advanced only
 its own view, the other view remained serialized-identical, all commands exited
 zero with empty stderr, and the legacy endpoint received no connections. The
 isolated exercise cleaned up its processes and data. Fresh generic code review
-and independent product preflight are again the only remaining gates.
+pass 1 then found two actionable version-boundary defects: the production v2
+seam still accepted/decoded v1 frames, and the two endpoint versions could
+leave two daemon writers sharing `packwalk.sqlite` while v2 migrated its
+schema. Both blockers and the follow-up storage audit are now repaired.
+Production IPC is statically and dynamically protocol-v2-only. V2 owns
+`packwalk-v2.sqlite`, and one normalized durable-database identity now maps to
+one short endpoint across launch environments. Startup snapshots the active
+legacy main/WAL/SHM unit, retains a checked pre-migration copy, migrates a
+rollback-journal staging database, and atomically promotes it without taking
+the legacy database away from its older writer. Backup completion cannot be
+interrupted ahead of resource finalization, handled failures clean staging,
+and a retained backup from an interrupted startup can resume safely.
+
+Focused verification passes 37 tests and `npm run verify` passes 21 files and
+92 tests plus typecheck, lint, and build. The opt-in real persisted polling
+check passed in 8.23 seconds. A compiled exercise against the machine's still-
+running protocol-v1 daemon returned 19 unique exact identities through both
+text and protocol-v2 JSON with zero exits and empty stderr. After another
+ordinary persisted turn boundary, only this task's exact row advanced; the
+other 18 serialized view hashes and the identity set remained unchanged. The
+test-started v2 daemon was stopped by its verified endpoint-owning PID, while
+the pre-existing v1 daemon remained running. Ticket 04 remains claimed for a
+wholly fresh generic review and independent product preflight. Neither has yet
+reported a final verdict.
 Restoration, history, deletion, live attachment, intervention, and routing
 remain outside Ticket 04, and no maintainer acceptance is claimed.
 

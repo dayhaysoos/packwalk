@@ -150,6 +150,17 @@ const snapshotBytes = (projectIdentity: string): Uint8Array =>
     "utf8",
   )
 
+const legacySnapshotBytes = (): Uint8Array =>
+  Buffer.from(
+    `${JSON.stringify(
+      SessionEvent.cases.SessionSnapshot.make({
+        protocolVersion: 1,
+        view,
+      }),
+    )}\n`,
+    "utf8",
+  )
+
 it.effect("encodes and decodes the public session event stream across local IPC", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
@@ -222,6 +233,28 @@ it.live("rejects malformed UTF-8 in a session event instead of replacing bytes",
       expect(result.failure.message).toBe(
         "PackWalk received an invalid IPC frame",
       )
+    }
+  }),
+)
+
+it.live("rejects a legacy singleton event on the protocol-v2 client", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = makeEndpoint(directory)
+
+    yield* makeRawEventServer(endpoint, [legacySnapshotBytes()])
+    const result = yield* receiveOneEvent(endpoint).pipe(Effect.result)
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "PackWalk.LocalIpcError",
+        code: "invalid-frame",
+        message: "PackWalk received an invalid session event",
+      })
     }
   }),
 )
@@ -316,6 +349,36 @@ it.live("closes a malformed-command peer and continues serving", () =>
     peer.write('{"_tag":"UnknownCommand","protocolVersion":1}\n')
     yield* closed
 
+    expect(Array.from(yield* receiveOneEvent(endpoint))).toHaveLength(1)
+  }),
+)
+
+it.live("rejects a legacy subscription without emitting a v2 event", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = makeEndpoint(directory)
+    const events = Stream.make(
+      SessionEvent.cases.SessionsSnapshot.make({
+        protocolVersion: 2,
+        views: [view],
+      }),
+    )
+    const server = yield* makeSessionEventServer(endpoint)
+    yield* runSessionEventServer(server, events).pipe(Effect.forkScoped)
+    const peer = yield* openRawClient(endpoint)
+    let receivedData = false
+    peer.once("data", () => {
+      receivedData = true
+    })
+
+    const closed = waitForSocketClose(peer)
+    peer.write('{"_tag":"SubscribeSession","protocolVersion":1}\n')
+    yield* closed
+
+    expect(receivedData).toBe(false)
     expect(Array.from(yield* receiveOneEvent(endpoint))).toHaveLength(1)
   }),
 )
