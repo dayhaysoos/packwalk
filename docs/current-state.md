@@ -121,6 +121,10 @@ explicit tagged unavailable result rather than optional session fields. Direct
 Codex or SQLite reads remain outside the client boundary. Deterministic
 verification passes 17 files and 75 tests; a compiled real-product smoke passed
 for both available one-shot forms and invalid-argument failure behavior.
+Generic review pass 1 found no Ticket 03 Specification issue and required two
+Standards corrections: CLI argv now passes through a strict Effect Schema, and
+one `OneShot { format }` command owns the shared text/JSON execution path. Those
+corrections are implemented and awaiting fresh review.
 
 ## Reproduce
 

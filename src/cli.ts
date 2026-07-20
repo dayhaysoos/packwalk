@@ -43,20 +43,11 @@ const cliProgram = Effect.scoped(
         makePlainCliOutput.pipe(
           Effect.flatMap((output) => runSessionClient(events, output)),
         ),
-      Text: () =>
+      OneShot: ({ format }) =>
         makeOneShotCliOutput.pipe(
           Effect.flatMap((output) =>
             runOneShotSessionClient(events, output, {
-              format: "text",
-              lineSeparator: EOL,
-            }),
-          ),
-        ),
-      Json: () =>
-        makeOneShotCliOutput.pipe(
-          Effect.flatMap((output) =>
-            runOneShotSessionClient(events, output, {
-              format: "json",
+              format,
               lineSeparator: EOL,
             }),
           ),

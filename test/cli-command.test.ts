@@ -10,8 +10,12 @@ import {
 it.effect("selects the refreshing, one-shot text, and one-shot JSON commands exactly", () =>
   Effect.gen(function* () {
     expect(yield* parseCliCommand([])).toEqual(CliCommand.Refresh())
-    expect(yield* parseCliCommand(["text"])).toEqual(CliCommand.Text())
-    expect(yield* parseCliCommand(["json"])).toEqual(CliCommand.Json())
+    expect(yield* parseCliCommand(["text"])).toEqual(
+      CliCommand.OneShot({ format: "text" }),
+    )
+    expect(yield* parseCliCommand(["json"])).toEqual(
+      CliCommand.OneShot({ format: "json" }),
+    )
   }),
 )
 

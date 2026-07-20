@@ -43,3 +43,10 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   required structural fields, no forbidden content field, and native final
   line endings. Invalid compiled CLI usage returned the fixed usage on stderr
   and exit 1 before runtime setup.
+- 2026-07-20: Generic review pass 1 reported zero Specification findings and
+  two Standards findings. CLI arguments are now decoded through one strict
+  Effect Schema before mapping to an internal `Refresh` or
+  `OneShot { format }` command, satisfying the repository's command-validation
+  authority. The single `OneShot` branch also removes duplicated text/JSON
+  output pipelines. Focused tests and typecheck are green; a fresh independent
+  review is required after full verification.
