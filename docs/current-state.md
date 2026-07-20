@@ -208,7 +208,11 @@ claimed.
 [Ticket 04](../.scratch/packwalk-post-launch-orientation/issues/04-keep-overlapping-codex-sessions-distinct.md)
 is implemented on `agent/ticket-04-overlapping-sessions` from fixed integration
 point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` and remains claimed while its
-review gates run. The daemon now publishes protocol-v2 complete overviews. A
+review gates run.
+
+### Current Ticket 04 contract and evidence
+
+The daemon publishes protocol-v2 complete overviews. A
 committed poll normally uses `SessionsUpdated` with exact `changedSessionIds`;
 when only that richer envelope exceeds the bounded frame, the equivalent
 complete `SessionsSnapshot` is the committed fallback. Both tags are complete
@@ -220,17 +224,34 @@ session leaves every other projection byte-for-byte unchanged. Duplicate exact
 source IDs fail visibly as a redacted `source-ambiguous` result before project
 resolution or arbitrary selection.
 
-The expanded SQLite schema migrates the v1 singleton transactionally after a
-SQLite-aware backup, validates legacy rows with Effect Schema before migration,
-and records the checked migration while preserving the global commit sequence.
-Project comparison has injected Windows case/separator normalization and
-case-sensitive macOS/Linux behavior; session identity remains exact on every
-platform. Deterministic acceptance crosses a two-session Codex SQLite fixture
-through the real daemon and local IPC seam into the CLI formatter. Full
-verification passes 21 files and 83 tests plus typecheck, lint, and build. The
-suite caps Vitest at four workers after default machine-wide file fan-out
-repeatedly caused `EPERM` in the existing detached process-tree cleanup; two
-consecutive complete test runs and the final verification run are green.
+The one scoped authoritative SQLite connection owns writer election before
+legacy import, transport, workers, or publication. It snapshots and validates
+legacy state, then transactionally imports into the already-open locked current
+database; no database pathname is promoted over the owned inode. Before SQLite
+opens, the physical storage directory must qualify as APFS on macOS or a known
+direct local filesystem on Linux. Remote, unknown, failed, and stacked POSIX
+filesystem probes fail closed. Because the pinned Node runtime cannot
+positively distinguish a mapped Windows drive, authoritative storage fails
+closed on Windows before directory or SQLite creation; Ticket 10 must add
+native volume qualification before Windows storage is supported. Deterministic
+Windows path, identity, and named-pipe contracts remain covered. Project
+comparison has injected Windows case/separator normalization and
+case-sensitive macOS/Linux behavior; exact Codex identity remains authoritative
+on every platform.
+
+After storage election, any endpoint bind failure is transport unavailable; an
+accepting listener is not treated as evidence of a healthy daemon. The repaired
+candidate crosses a two-session Codex SQLite fixture through the real daemon
+and local IPC seam into the CLI formatter. `npm run verify` passes 22 files and
+141 tests plus typecheck, lint, and build, and the opt-in persisted-Codex check
+passes in 8.21 seconds. Pass 11's code and handoff blockers are repaired, but a
+wholly fresh generic review and independent product preflight remain required.
+
+### Ticket 04 delivery chronology
+
+The paragraphs below are chronological checkpoints. Pending gates and designs
+such as staged-main promotion describe their moment in the delivery history;
+they are not the current contract above.
 
 The first compiled-product check against the machine's persistent protocol-v1
 daemon exposed an upgrade blocker: the old daemon accepted its unversioned
@@ -465,15 +486,59 @@ tests plus typecheck, lint, and build; a static architecture law keeps
 check passes in 8.23 seconds. An isolated compiled daemon was the sole open
 owner of its v2 database. Independent ordinary and transport-unlinked
 contenders both exited 1 with no output while that owner stayed alive; after
-its deliberate `SIGKILL`, a successor acquired the same endpoint and restored
-both exact same-project sessions. The installed JSON and text clients then
+its deliberate `SIGKILL`, a successor acquired the same endpoint and reopened
+the durable snapshot containing both exact same-project sessions. The installed
+JSON and text clients then
 returned 19 distinct exact identities, including two in one project, with zero
 command errors. Positively identified v2 PID 2155 owned the production v2
 database and endpoint and was stopped; pre-existing v1 PID 77857 remains alive
 and untouched. Ticket 04 remains claimed only for a wholly fresh generic review
 and independent product preflight; no maintainer acceptance is claimed.
-Restoration, history, deletion, live attachment, intervention, and routing
-remain outside Ticket 04, and no maintainer acceptance is claimed.
+Fresh generic review pass 11 reports zero actionable Specification findings
+and two independently confirmed Standards blockers. Runtime resolution still
+accepts network-backed application-data paths even though exclusive WAL
+authority is local-filesystem-only. After storage authority succeeds, an
+unrelated accepting listener can also be misclassified as `AlreadyRunning`,
+even though a healthy current daemon would have prevented that storage
+acquisition. This handoff additionally needs its superseded staged-promotion
+chronology marked historical and its durable restart wording distinguished
+from Ticket 05's broader restoration/degradation behavior. Ticket 04 remains
+claimed while red regressions and documentation repairs address every finding;
+full verification and an entirely fresh generic review follow. Product
+preflight remains paused.
+Pass 11's blockers are repaired red-first. Deterministic laws reject remote,
+unknown, and failed POSIX filesystem probes plus direct Windows UNC and device
+spellings; locality is revalidated before transport. A foreign accepting
+listener after storage election now produces the same redacted
+transport-unavailable failure as every other bind error. The current contract
+is separated from superseded delivery chronology above. `npm run verify`
+passes 22 files and 140 tests plus typecheck, lint, and build, and the opt-in
+persisted-Codex check passes in 8.22 seconds. Ticket 04 remains claimed for an
+entirely fresh generic review and independent product preflight.
+An independent follow-up locality audit found two remaining P1s before that
+review could start. A drive-letter spelling can still hide a mapped Windows
+share, so release code must fail Windows storage closed until Ticket 10 adds a
+positive native volume qualification. Linux eCryptfs and overlayfs can hide
+network-backed lower layers and must be removed from the qualified-local
+allowlist. Red policy laws now cover both findings; verification and review
+remain paused until their green implementation and handoff repair.
+Both follow-up P1s are now implemented green. Windows native storage fails
+closed until positive native volume qualification exists, while pure Windows
+path, identity, and named-pipe laws remain deterministic. eCryptfs and
+overlayfs are no longer treated as direct local Linux filesystems. The 53
+focused locality and endpoint tests pass; `npm run verify` passes 22 files and
+141 tests plus typecheck, lint, and build; and the real persisted-Codex check
+passes in 8.21 seconds. On the fresh compiled build, both an ordinary contender
+and a contender after transport unlink exited 1 while the sole database owner
+remained alive; after deliberate `SIGKILL`, its successor reopened both exact
+fixture sessions with zero combined process-output bytes. Installed text and
+JSON returned 19 unique exact identities, including two in one project. The
+positively identified v2 database/endpoint owner PID 23156 was stopped; v1 PID
+77857 remains alive and untouched. Ticket 04 is claimed only for a wholly
+fresh generic review and independent product preflight.
+Ticket 05's stale/degraded recovery semantics, evidence history, deletion,
+live attachment, intervention, and routing remain outside Ticket 04, and no
+maintainer acceptance is claimed.
 
 ## Reproduce
 

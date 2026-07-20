@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -23,6 +24,7 @@ import {
   type DurableDatabaseAuthority,
   deriveRuntimePaths,
   identifyNativeDurablePath,
+  isQualifiedLocalStorageFileSystem,
   prepareRuntimeDirectories,
   RuntimePaths,
   type RuntimePathInputs,
@@ -70,6 +72,183 @@ const nativeRuntimeInput = (root: string): RuntimePathInputs => {
 }
 
 describe("PackWalk runtime paths", () => {
+  it.each([
+    0n,
+    0x0000_6969n,
+    0x0000_517bn,
+    0xfe53_4d42n,
+    0xff53_4d42n,
+    0x0102_1997n,
+    0x6573_5546n,
+    0x0000_f15fn,
+    0x794c_7630n,
+    0xdead_beefn,
+  ])("rejects unqualified Linux filesystem type %#", (fileSystemType) => {
+    expect(
+      isQualifiedLocalStorageFileSystem({
+        platform: "linux",
+        physicalDirectory: "/home/example/.local/share/packwalk",
+        fileSystemType,
+      }),
+    ).toBe(false)
+  })
+
+  it.each([
+    0x0000_ef53n,
+    0x5846_5342n,
+    0x9123_683en,
+  ])("accepts qualified local Linux filesystem type %#", (fileSystemType) => {
+    expect(
+      isQualifiedLocalStorageFileSystem({
+        platform: "linux",
+        physicalDirectory: "/home/example/.local/share/packwalk",
+        fileSystemType,
+      }),
+    ).toBe(true)
+  })
+
+  it("accepts APFS and rejects unqualified macOS filesystem types", () => {
+    const input = {
+      platform: "darwin" as const,
+      physicalDirectory: "/Users/example/Library/Application Support/PackWalk",
+    }
+
+    expect(
+      isQualifiedLocalStorageFileSystem({ ...input, fileSystemType: 0x1an }),
+    ).toBe(true)
+    expect(
+      isQualifiedLocalStorageFileSystem({ ...input, fileSystemType: 0n }),
+    ).toBe(false)
+    expect(
+      isQualifiedLocalStorageFileSystem({ ...input, fileSystemType: 2n }),
+    ).toBe(false)
+  })
+
+  it.each([
+    "\\\\server\\share\\LocalData",
+    "//server/share/LocalData",
+    "\\\\?\\UNC\\server\\share\\LocalData",
+    "\\\\?\\C:\\LocalData",
+  ])("rejects unqualified Windows storage path %s", (physicalDirectory) => {
+    expect(
+      isQualifiedLocalStorageFileSystem({
+        platform: "win32",
+        physicalDirectory,
+        fileSystemType: 0n,
+      }),
+    ).toBe(false)
+  })
+
+  it("does not qualify a Windows drive spelling without native volume evidence", () => {
+    expect(
+      isQualifiedLocalStorageFileSystem({
+        platform: "win32",
+        physicalDirectory: "C:\\Users\\example\\AppData\\Local\\PackWalk",
+        fileSystemType: 0n,
+      }),
+    ).toBe(false)
+  })
+
+  it("rejects a Windows UNC data root before native identification", () => {
+    let identified = false
+
+    expect(() =>
+      deriveRuntimePaths(
+        {
+          platform: "win32",
+          homeDirectory: "C:\\Users\\example",
+          localAppData: "\\\\server\\share\\LocalData",
+        },
+        () => {
+          identified = true
+          return databaseAuthority()
+        },
+      ),
+    ).toThrow("PackWalk storage requires a qualified local filesystem")
+    expect(identified).toBe(false)
+  })
+
+  it.skipIf(process.platform === "win32")(
+    "fails closed when the native filesystem probe fails",
+    () => {
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-nf-"))
+      const databasePath = join(testRoot, "packwalk-v2.sqlite")
+
+      try {
+        expect(() =>
+          identifyNativeDurablePath(databasePath, () => {
+            throw new Error("filesystem probe failed")
+          }),
+        ).toThrow("filesystem probe failed")
+        expect(() =>
+          identifyNativeDurablePath(databasePath, () => 0n),
+        ).toThrow("PackWalk storage requires a qualified local filesystem")
+      } finally {
+        rmSync(testRoot, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.effect.skipIf(process.platform === "win32")(
+    "fails revalidation when storage is no longer on a qualified filesystem",
+    () => {
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-nr-"))
+      const qualifiedType = process.platform === "darwin" ? 0x1an : 0xef53n
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(testRoot, { recursive: true, force: true })),
+        )
+        const paths = deriveRuntimePaths(
+          nativeRuntimeInput(testRoot),
+          (databasePath) =>
+            identifyNativeDurablePath(databasePath, () => qualifiedType),
+        )
+
+        const failure = yield* verifyRuntimeAuthority(
+          paths,
+          (databasePath) =>
+            identifyNativeDurablePath(databasePath, () => 0n),
+        ).pipe(Effect.flip)
+
+        expect(failure).toMatchObject({
+          _tag: "PackWalk.RuntimePathError",
+          message: "PackWalk database authority changed",
+        })
+      }).pipe(Effect.scoped)
+    },
+  )
+
+  it.skipIf(process.platform === "win32")(
+    "qualifies a final database symlink through its physical target parent",
+    () => {
+      const testRoot = mkdtempSync(join(nativeTempDirectory, "pw-ns-"))
+      const lexicalDirectory = join(testRoot, "lexical")
+      const targetDirectory = join(testRoot, "target")
+      const targetDatabase = join(targetDirectory, "packwalk-v2.sqlite")
+      const databasePath = join(lexicalDirectory, "packwalk-v2.sqlite")
+      const qualifiedType = process.platform === "darwin" ? 0x1an : 0xef53n
+      mkdirSync(lexicalDirectory, { mode: 0o700 })
+      mkdirSync(targetDirectory, { mode: 0o700 })
+      writeFileSync(targetDatabase, "database")
+      symlinkSync(targetDatabase, databasePath, "file")
+      const probedDirectories: Array<string> = []
+
+      try {
+        identifyNativeDurablePath(databasePath, (physicalDirectory) => {
+          probedDirectories.push(physicalDirectory)
+          return qualifiedType
+        })
+
+        expect(probedDirectories).toEqual([
+          realpathSync.native(targetDirectory),
+        ])
+      } finally {
+        rmSync(testRoot, { recursive: true, force: true })
+      }
+    },
+  )
+
   it("uses per-user local data and a Unix socket on macOS", () => {
     const paths = deriveRuntimePaths(
       {

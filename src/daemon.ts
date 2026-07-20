@@ -32,20 +32,17 @@ const daemonProgram = Effect.scoped(
     )
     const storage = Context.get(storageContext, SessionStorage)
 
-    const endpointClaim = yield* claimSessionDaemonEndpoint(
+    const endpointServer = yield* claimSessionDaemonEndpoint(
       paths.ipcEndpoint,
     )
     yield* verifyRuntimeAuthority(paths)
-    if (endpointClaim._tag === "AlreadyRunning") {
-      return
-    }
 
     const dependencies = Layer.mergeAll(
       codexSourceLayer(paths.codexDatabasePath),
       Layer.succeed(SessionStorage, storage),
     )
     const daemonContext = yield* Layer.build(
-      sessionDaemonLayerFromServer(endpointClaim.server).pipe(
+      sessionDaemonLayerFromServer(endpointServer).pipe(
         Layer.provide(dependencies),
       ),
     )

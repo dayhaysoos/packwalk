@@ -24,14 +24,23 @@ transaction, enters WAL, verifies its settings, and retains the resulting file
 lock for the Layer scope. A second daemon fails storage acquisition visibly; a
 generic busy result is not reclassified as proof that a healthy daemon exists.
 The client Unix socket or Windows named pipe is transport and liveness only.
+After storage election succeeds, every endpoint bind failure is a visible
+transport-unavailable result; an accepting endpoint alone never proves that a
+compatible PackWalk daemon owns durable authority.
 
-The database lives in PackWalk's platform-specific local application-data
-directory, never on a network filesystem. The authoritative connection
-explicitly enables and verifies exclusive locking, foreign keys, defensive
-mode, extension prohibition, busy timeout, integer behavior, WAL, and
-`synchronous=FULL`. Authoritative commands that may write use
-`BEGIN IMMEDIATE`; read-only queries do not start an additional write
-transaction.
+The database lives in PackWalk's platform-specific application-data directory
+only when its physical parent is qualified as local before SQLite opens.
+macOS requires APFS; Linux uses an explicit local-filesystem allowlist and
+rejects unknown, remote, zero, failed, or stacked-filesystem probes. The pinned
+Node runtime cannot positively distinguish a mapped Windows drive from a local
+drive, so authoritative storage fails closed on Windows before directory or
+SQLite creation. Ticket 10 must add native volume qualification before Windows
+storage is supported. The authoritative connection explicitly enables and
+verifies exclusive locking, foreign keys, defensive mode, extension
+prohibition, busy timeout, integer behavior, WAL, and `synchronous=FULL`.
+Authoritative commands that may write use `BEGIN IMMEDIATE`; read-only queries
+do not start an additional write transaction.
+
 Portable, repository-owned migrations are immutable, ordered, checksummed,
 forward-only, and transactionally applied. They do not depend on
 driver-specific behavior.

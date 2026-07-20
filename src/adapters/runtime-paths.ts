@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   realpathSync,
+  statfsSync,
   statSync,
 } from "node:fs"
 import { homedir } from "node:os"
@@ -57,6 +58,80 @@ export interface DurableDatabaseAuthority {
 // installed client cannot silently connect to a persistent older daemon.
 const sessionIpcNamespace = "v2"
 
+const qualifiedLocalLinuxFileSystemTypes = new Set([
+  0x0000_3434n, // NILFS2
+  0x0000_4d44n, // FAT
+  0x0000_ef53n, // ext2, ext3, ext4
+  0x0001_1954n, // UFS
+  0x0102_1994n, // tmpfs
+  0x2011_bab0n, // exFAT
+  0x2405_1905n, // UBIFS
+  0x2fc1_2fc1n, // ZFS
+  0x3153_464an, // JFS
+  0x5265_4973n, // ReiserFS
+  0x5846_5342n, // XFS
+  0x7366_746en, // NTFS
+  0x8584_58f6n, // ramfs
+  0x9123_683en, // Btrfs
+  0xca45_1a4en, // bcachefs
+  0xf2f5_2010n, // F2FS
+])
+
+export interface LocalStorageFileSystemInput {
+  readonly platform: RuntimePathInputs["platform"]
+  readonly physicalDirectory: string
+  readonly fileSystemType: bigint
+}
+
+const isOrdinaryAbsoluteWindowsPath = (path: string): boolean =>
+  /^[A-Za-z]:\\/.test(win32.normalize(path))
+
+/** @internal Exported for deterministic cross-platform policy laws. */
+export const isQualifiedLocalStorageFileSystem = ({
+  platform,
+  fileSystemType,
+}: LocalStorageFileSystemInput): boolean => {
+  if (platform === "win32") {
+    // Pinned Node does not expose the native volume type needed to prove that
+    // a drive-letter path is not a mapped network share. Ticket 10 must add
+    // that positive qualification before release storage can open on Windows.
+    return false
+  }
+
+  const normalizedType = BigInt.asUintN(32, fileSystemType)
+  return platform === "darwin"
+    ? normalizedType === 0x1an
+    : qualifiedLocalLinuxFileSystemTypes.has(normalizedType)
+}
+
+export type StorageFileSystemProbe = (
+  physicalDirectory: string,
+) => bigint
+
+const probeNativeStorageFileSystem: StorageFileSystemProbe =
+  (physicalDirectory) =>
+    statfsSync(physicalDirectory, { bigint: true }).type
+
+const requireQualifiedLocalStorageFileSystem = (
+  physicalDirectory: string,
+  platform: RuntimePathInputs["platform"],
+  probe: StorageFileSystemProbe,
+): void => {
+  const fileSystemType =
+    platform === "win32" ? 0n : probe(physicalDirectory)
+  if (
+    !isQualifiedLocalStorageFileSystem({
+      platform,
+      physicalDirectory,
+      fileSystemType,
+    })
+  ) {
+    throw new Error(
+      "PackWalk storage requires a qualified local filesystem",
+    )
+  }
+}
+
 export type DurablePathIdentifier = (
   path: string,
 ) => DurableDatabaseAuthority
@@ -96,8 +171,17 @@ const normalizeDurableDatabaseAuthority = (
 const captureNativeDirectoryAuthority = (
   directory: string,
   databaseName: string,
+  probeStorageFileSystem: StorageFileSystemProbe,
 ): DurableDatabaseAuthority => {
   const directoryPath = realpathSync.native(directory)
+  if (!supportedPlatform(process.platform)) {
+    throw new Error("Unsupported operating system")
+  }
+  requireQualifiedLocalStorageFileSystem(
+    directoryPath,
+    process.platform,
+    probeStorageFileSystem,
+  )
   const normalizedDatabaseName = normalizeDatabaseName(
     databaseName,
     process.platform === "win32" ? "win32" : "linux",
@@ -196,7 +280,11 @@ const requireSingleLinkDatabaseEntry = (path: string): void => {
   }
 }
 
-const captureNativeDurablePath: DurablePathIdentifier = (path) => {
+const captureNativeDurablePath = (
+  path: string,
+  probeStorageFileSystem: StorageFileSystemProbe =
+    probeNativeStorageFileSystem,
+): DurableDatabaseAuthority => {
   let existingEntry: ReturnType<typeof lstatSync> | undefined
   try {
     existingEntry = lstatSync(path)
@@ -215,6 +303,7 @@ const captureNativeDurablePath: DurablePathIdentifier = (path) => {
     return captureNativeDirectoryAuthority(
       dirname(resolvedDatabasePath),
       basename(resolvedDatabasePath),
+      probeStorageFileSystem,
     )
   }
 
@@ -225,6 +314,7 @@ const captureNativeDurablePath: DurablePathIdentifier = (path) => {
   return captureNativeDirectoryAuthority(
     dirname(path),
     basename(path),
+    probeStorageFileSystem,
   )
 }
 
@@ -236,9 +326,18 @@ const captureNativeDurablePath: DurablePathIdentifier = (path) => {
  * a dangling or unqualified final symlink fails instead of falling back to its
  * spelling.
  */
-export const identifyNativeDurablePath: DurablePathIdentifier = (path) => {
+export const identifyNativeDurablePath = (
+  path: string,
+  probeStorageFileSystem: StorageFileSystemProbe =
+    probeNativeStorageFileSystem,
+): DurableDatabaseAuthority => {
+  if (process.platform === "win32") {
+    throw new Error(
+      "PackWalk storage requires a qualified local filesystem",
+    )
+  }
   secureNativePackWalkDataDirectory(dirname(path))
-  return captureNativeDurablePath(path)
+  return captureNativeDurablePath(path, probeStorageFileSystem)
 }
 
 const durableDatabaseToken = (
@@ -285,6 +384,11 @@ export const deriveRuntimePaths = (
     const dataRoot =
       input.localAppData ??
       win32.join(input.homeDirectory, "AppData", "Local")
+    if (!isOrdinaryAbsoluteWindowsPath(dataRoot)) {
+      throw new Error(
+        "PackWalk storage requires a qualified local filesystem",
+      )
+    }
     const packWalkDataDirectory = win32.join(dataRoot, "PackWalk")
     const packWalkDatabasePath = win32.join(
       packWalkDataDirectory,

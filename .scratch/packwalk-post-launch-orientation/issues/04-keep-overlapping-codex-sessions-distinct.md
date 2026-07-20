@@ -414,10 +414,64 @@ sessions overlap, share a repository, or have duplicate display labels.
   the sole open owner of its v2 database. Independent ordinary and
   transport-unlinked contenders both exited 1 with no output while that owner
   stayed alive; after its deliberate `SIGKILL`, a successor acquired the same
-  endpoint and restored both exact same-project sessions. The installed JSON
-  and text clients then returned 19 distinct exact identities, including two
-  in one project, with zero command errors. Positively identified v2 PID 2155
+  endpoint and reopened the durable snapshot containing both exact
+  same-project sessions. The installed JSON and text clients then returned 19
+  distinct exact identities, including two in one project, with zero command
+  errors. Positively identified v2 PID 2155
   owned the production v2 database and endpoint and was stopped; pre-existing
   v1 PID 77857 remains alive and untouched. Ticket 04 remains claimed only for
   a wholly fresh generic review and independent product preflight; no
   maintainer acceptance is claimed.
+- 2026-07-20: Fresh generic review pass 11 reports zero actionable
+  Specification findings and two independently confirmed Standards blockers.
+  Runtime resolution still accepts network-backed application-data paths even
+  though exclusive WAL authority is local-filesystem-only. After storage
+  authority succeeds, an unrelated accepting listener can also be
+  misclassified as `AlreadyRunning`, even though a healthy current daemon
+  would have prevented that storage acquisition. The authoritative current
+  handoff additionally needs its superseded staged-promotion chronology marked
+  historical and its durable restart wording distinguished from Ticket 05's
+  broader restoration/degradation behavior. Ticket 04 remains claimed while
+  red regressions and documentation repairs address every finding; full
+  verification and an entirely fresh generic review follow. Product preflight
+  remains paused.
+- 2026-07-20: Pass 11's blockers are repaired red-first. Runtime authority now
+  qualifies the physical storage directory before SQLite opens and again
+  before transport: APFS on macOS, an explicit local-filesystem allowlist on
+  Linux, and ordinary absolute drive spelling on Windows. Remote, unknown,
+  zero, and failed POSIX probes plus direct Windows UNC and device spellings
+  fail closed. The pinned Node runtime cannot distinguish mapped Windows drives,
+  so those remain unqualified and outside the release claim until Ticket 10
+  adds native qualification or keeps them unsupported. After storage election,
+  a foreign accepting listener now produces a redacted transport-unavailable
+  failure rather than false `AlreadyRunning`. The authoritative current-state
+  contract is separated from superseded staged-promotion chronology and
+  ordinary durable restart no longer claims Ticket 05's broader recovery
+  semantics. `npm run verify` passes 22 files and 140 tests plus typecheck,
+  lint, and build; the persisted-Codex check passes in 8.22 seconds. Ticket 04
+  remains claimed for an entirely fresh generic review and independent product
+  preflight; pre-existing v1 PID 77857 remains alive and untouched.
+- 2026-07-20: An independent follow-up locality audit found two remaining P1s
+  before the fresh review could start. A drive-letter spelling can still hide
+  a mapped Windows share, so release code must fail Windows storage closed
+  until Ticket 10 adds positive native volume qualification. Linux eCryptfs and
+  overlayfs can hide network-backed lower layers and must be removed from the
+  qualified-local allowlist. `$tdd` policy laws now fail on both exact cases;
+  verification, generic review, and product preflight remain paused until the
+  green implementation and matching handoff repair.
+- 2026-07-20: Both follow-up P1s are implemented green. Windows native storage
+  now fails before directory or SQLite creation until Ticket 10 adds positive
+  native volume qualification; deterministic Windows path, identity, and
+  named-pipe contracts remain covered. eCryptfs and overlayfs are removed from
+  the qualified direct-local Linux set because their lower storage cannot be
+  proven by top-layer `statfs`. The 53 focused locality and endpoint tests pass;
+  `npm run verify` passes 22 files and 141 tests plus typecheck, lint, and build;
+  and the real persisted-Codex check passes in 8.21 seconds. On the fresh
+  compiled build, ordinary and transport-unlinked contenders both exited 1
+  while the sole database owner remained alive; after deliberate `SIGKILL`, a
+  successor reopened both exact fixture sessions with zero combined output
+  bytes. Installed text and JSON returned 19 unique exact identities, including
+  two in one project. Positively identified v2 database/endpoint owner PID
+  23156 was stopped; v1 PID 77857 remains alive and untouched. Ticket 04 is
+  claimed only for an entirely fresh generic review and independent product
+  preflight.

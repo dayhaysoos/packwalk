@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { once } from "node:events"
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
+import { createServer, type Socket } from "node:net"
 import { join } from "node:path"
 
 import { expect, it } from "@effect/vitest"
@@ -23,6 +25,50 @@ const endpointIn = (directory: string): string =>
     ? `\\\\.\\pipe\\packwalk-ownership-test-${randomUUID()}`
     : join(directory, "daemon.sock")
 
+it.effect("rejects an unrelated accepting transport after storage election", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-foreign-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = endpointIn(directory)
+    yield* Layer.build(
+      sqliteSessionStorageLayer(join(directory, "packwalk.sqlite")),
+    )
+
+    const sockets = new Set<Socket>()
+    const server = createServer((socket) => {
+      sockets.add(socket)
+      socket.once("close", () => sockets.delete(socket))
+    })
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        for (const socket of sockets) socket.destroy()
+        if (!server.listening) return
+        const closed = once(server, "close")
+        server.close()
+        await closed
+      }),
+    )
+    yield* Effect.promise(async () => {
+      const listening = once(server, "listening")
+      server.listen(endpoint)
+      await listening
+    })
+
+    const claim = yield* Effect.result(claimSessionDaemonEndpoint(endpoint))
+
+    expect(Result.isFailure(claim)).toBe(true)
+    if (Result.isFailure(claim)) {
+      expect(claim.failure).toMatchObject({
+        _tag: "PackWalk.LocalIpcError",
+        code: "transport-unavailable",
+        message: "PackWalk could not start its local session service",
+      })
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
 it.effect("elects exactly one daemon endpoint owner when starts compete", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ownership-test-"))
@@ -33,27 +79,27 @@ it.effect("elects exactly one daemon endpoint owner when starts compete", () =>
 
     const claims = yield* Effect.all(
       [
-        claimSessionDaemonEndpoint(endpoint),
-        claimSessionDaemonEndpoint(endpoint),
+        Effect.result(claimSessionDaemonEndpoint(endpoint)),
+        Effect.result(claimSessionDaemonEndpoint(endpoint)),
       ],
       { concurrency: "unbounded" },
     )
 
-    expect(claims.filter((claim) => claim._tag === "Owned")).toHaveLength(1)
-    expect(
-      claims.filter((claim) => claim._tag === "AlreadyRunning"),
-    ).toHaveLength(1)
-    const owner = claims.find((claim) => claim._tag === "Owned")
-    if (owner?._tag !== "Owned") {
+    expect(claims.filter(Result.isSuccess)).toHaveLength(1)
+    expect(claims.filter(Result.isFailure)).toHaveLength(1)
+    const owner = claims.find(Result.isSuccess)
+    if (owner === undefined || Result.isFailure(owner)) {
       return yield* Effect.die("Expected one owned daemon endpoint")
     }
-    yield* runSessionEventServer(owner.server, Stream.never).pipe(
+    yield* runSessionEventServer(owner.success, Stream.never).pipe(
       Effect.forkScoped,
     )
 
-    expect((yield* claimSessionDaemonEndpoint(endpoint))._tag).toBe(
-      "AlreadyRunning",
-    )
+    expect(
+      Result.isFailure(
+        yield* Effect.result(claimSessionDaemonEndpoint(endpoint)),
+      ),
+    ).toBe(true)
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
@@ -72,22 +118,20 @@ it.effect.skipIf(process.platform === "win32")(
       const transportEndpoint = join(transportDirectory, "daemon.sock")
       yield* Layer.build(sqliteSessionStorageLayer(storagePath))
 
-      const first = yield* claimSessionDaemonEndpoint(
-        transportEndpoint,
-      )
-      expect(first._tag).toBe("Owned")
-      if (first._tag !== "Owned") {
-        return yield* Effect.die("Expected the first daemon to own authority")
-      }
-      yield* runSessionEventServer(first.server, Stream.never).pipe(
+      const first = yield* claimSessionDaemonEndpoint(transportEndpoint)
+      yield* runSessionEventServer(first, Stream.never).pipe(
         Effect.forkScoped,
       )
 
       renameSync(transportDirectory, movedTransportDirectory)
       mkdirSync(transportDirectory)
       expect(
-        (yield* claimSessionDaemonEndpoint(transportEndpoint))._tag,
-      ).toBe("Owned")
+        Result.isSuccess(
+          yield* Effect.result(
+            claimSessionDaemonEndpoint(transportEndpoint),
+          ),
+        ),
+      ).toBe(true)
 
       const competingStorage = yield* Effect.promise(() =>
         Effect.runPromiseExit(
@@ -113,22 +157,20 @@ it.effect.skipIf(process.platform === "win32")(
       const storagePath = join(testRoot, "packwalk.sqlite")
       const transportEndpoint = join(testRoot, "daemon.sock")
       yield* Layer.build(sqliteSessionStorageLayer(storagePath))
-      const first = yield* claimSessionDaemonEndpoint(
-        transportEndpoint,
-      )
-      expect(first._tag).toBe("Owned")
-      if (first._tag !== "Owned") {
-        return yield* Effect.die("Expected the first daemon to own authority")
-      }
-      yield* runSessionEventServer(first.server, Stream.never).pipe(
+      const first = yield* claimSessionDaemonEndpoint(transportEndpoint)
+      yield* runSessionEventServer(first, Stream.never).pipe(
         Effect.forkScoped,
       )
 
       rmSync(transportEndpoint)
 
       expect(
-        (yield* claimSessionDaemonEndpoint(transportEndpoint))._tag,
-      ).toBe("Owned")
+        Result.isSuccess(
+          yield* Effect.result(
+            claimSessionDaemonEndpoint(transportEndpoint),
+          ),
+        ),
+      ).toBe(true)
       const competingStorage = yield* Effect.promise(() =>
         Effect.runPromiseExit(
           Effect.scoped(
