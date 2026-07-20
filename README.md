@@ -8,12 +8,14 @@ without owning the lifecycle of the Codex sessions it assists.
 
 ## Status
 
-PackWalk's accepted first implementation is a read-only polling slice. It
-discovers supported existing Codex sessions, persists a content-free
+PackWalk's maintainer-accepted first tracer bullet established read-only
+polling for one ordinary Codex session. The current integration candidate
+extends that slice across supported sessions, persists a content-free
 multi-session overview and structural evidence history, exposes both through
 the PackWalk daemon, and displays polling updates in a plain command-line view
-without mixing exact identities. It does not yet establish trustworthy live
-attachment or perform a consequential action.
+without mixing exact identities. Ticket 06's history extension remains pending
+its review and product-preflight gates. PackWalk does not yet establish
+trustworthy live attachment or perform a consequential action.
 
 Read-only behavior is the current delivery state, not PackWalk's permanent
 product boundary. The intended local product progresses from truthful

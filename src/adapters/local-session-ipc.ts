@@ -18,6 +18,8 @@ import {
   encodeSessionProtocolEvent,
   encodeSessionHistoryProtocolResponse,
   MaximumSessionEventBytes,
+  sameSessionIdentity,
+  sameSessionView,
   SessionHistory,
   SessionHistoryCursor,
   SessionHistoryProtocolResponseJson,
@@ -475,6 +477,12 @@ export const inspectSessionHistory = Effect.fn("LocalSessionIpc.inspectHistory")
       const response = yield* Effect.scoped(
         querySessionHistoryPage(endpoint, sessionId, cursor),
       )
+      if (!sameSessionIdentity(response.sessionId, sessionId)) {
+        return yield* ipcError(
+          "invalid-frame",
+          "PackWalk received an invalid session history response",
+        )
+      }
       if (response._tag === "SessionHistoryUnavailable") return response
 
       const expectedAfter = cursor?.afterCommitSequence ?? 0
@@ -483,7 +491,7 @@ export const inspectSessionHistory = Effect.fn("LocalSessionIpc.inspectHistory")
         (throughCommitSequence !== undefined &&
           response.throughCommitSequence !== throughCommitSequence) ||
         (explainedView !== undefined &&
-          JSON.stringify(response.explainedView) !== JSON.stringify(explainedView)) ||
+          !sameSessionView(response.explainedView, explainedView)) ||
         (historyCoverage !== undefined &&
           response.historyCoverage !== historyCoverage)
       ) {

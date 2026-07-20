@@ -85,8 +85,8 @@ reopen Ticket 01 polling.
 
 The accepted Ticket 01 slice is published on `main` at
 `e7c7808f4b0ba1b90803634a7f8613beffb96383`, and
-`integration/full-local-product` has advanced through resolved Ticket 04 at
-`ef6ed5074b6a039ae7ced76e50508405c82f338e`.
+`integration/full-local-product` has advanced through resolved Ticket 05 at
+`0816410ea854b3a829ac49ee62826b58cc4174c4`.
 
 [Ticket 02](../.scratch/packwalk-post-launch-orientation/issues/02-attempt-one-post-launch-live-codex-event.md)
 is `needs-info` on `agent/ticket-02-live-event-experiment`. Static inspection
@@ -716,7 +716,7 @@ repeat inspection, prohibited content, and injected Windows/macOS/Linux
 encoding and path behavior. Compiled text and JSON inspection crossed real
 local IPC, and the opt-in installed-Codex check crossed a real persisted update
 through storage, publication, IPC, and public history inspection without
-changing Codex. `npm run verify` passes 26 files, 170 tests, and one intentional
+changing Codex. `npm run verify` passes 26 files, 172 tests, and one intentional
 host-policy skip plus typecheck, lint, and the production build.
 
 A cold real-product run also exposed that the former five-second reconnect
@@ -730,6 +730,19 @@ daemon PID 77857 remained alive and untouched. Deletion, generic migration
 recovery, contention, native platform qualification, live attachment,
 intervention, routing, and searchable transcript history remain outside Ticket
 06.
+
+Fresh generic review pass 1 reported four Standards findings and one
+Specification finding. Two crossed-session IPC regressions first failed when
+an unavailable response named a different exact identity, both on the initial
+request and after a valid first page. Every history response is now bound to
+the requested exact identity before its tag is handled. One domain-owned view
+equality function now protects schema, storage, and multipage IPC consistency;
+one shared terminal-text module owns security-sensitive escaping and timestamp
+rendering; README separates the accepted tracer bullet from the pending history
+extension; and the active integration SHA above now names resolved Ticket 05.
+All five findings are corrected. The focused four-file suite passes 21 tests,
+and full verification passes 26 files, 172 tests, and one intentional skip plus
+typecheck, lint, and build. A wholly fresh generic review remains.
 
 ## Reproduce
 

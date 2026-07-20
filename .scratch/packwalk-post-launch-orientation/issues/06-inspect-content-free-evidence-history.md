@@ -55,7 +55,7 @@ explains each session status without becoming a second transcript archive.
   laws, and compiled text/JSON commands over real local IPC. The opt-in test
   also crossed an installed Codex persisted update through storage, daemon
   publication, IPC, and public history inspection without changing Codex.
-  `npm run verify` passes 26 files, 170 tests, and one intentional host-policy
+  `npm run verify` passes 26 files, 172 tests, and one intentional host-policy
   skip plus typecheck, lint, and the production build.
 - 2026-07-20: A cold real-product command exposed that the former five-second
   client reconnect budget could expire while the new v4 daemon completed its
@@ -65,3 +65,14 @@ explains each session status without becoming a second transcript archive.
   CLI, including `prior-history-unavailable` coverage for migrated evidence.
   Only the PackWalk-owned v4 test daemon was restarted; the pre-existing
   protocol-v1 daemon PID 77857 remained alive and untouched.
+- 2026-07-20: Fresh generic review pass 1 reported four Standards findings and
+  one Specification finding. Red regressions reproduced crossed-session
+  unavailable responses both immediately and after a valid first page. Every
+  response is now checked against the requested exact identity before tag
+  handling; one domain comparator owns view equality across schema, storage,
+  and IPC; one shared terminal-text module owns escaping and UTC rendering;
+  README now distinguishes the accepted tracer bullet from pending Ticket 06;
+  and `docs/current-state.md` names the actual Ticket 05 integration head. All
+  five findings are corrected. The focused four-file suite passes 21 tests,
+  and `npm run verify` passes 26 files, 172 tests, and one intentional skip plus
+  typecheck, lint, and build. A wholly fresh generic review remains.

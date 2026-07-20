@@ -27,6 +27,7 @@ import {
   DateTimestampMs,
   Identity,
   ProjectIdentity,
+  sameSessionView,
   SessionEvidenceFact,
   SessionEvidenceOrigin,
   SessionHistoryCursor,
@@ -1504,22 +1505,6 @@ const decodeHistoryRow = (row: unknown) =>
     Effect.mapError(() => storageError("SessionStorage.decodeRow")),
     Effect.map(sessionEvidenceFactFromRow),
   )
-
-const sameSessionView = (left: SessionView, right: SessionView): boolean =>
-  left.protocolVersion === right.protocolVersion &&
-  left.sessionId === right.sessionId &&
-  left.projectIdentity === right.projectIdentity &&
-  left.activity === right.activity &&
-  left.evidenceSource === right.evidenceSource &&
-  left.state._tag === right.state._tag &&
-  left.freshness === right.freshness &&
-  left.provenance._tag === right.provenance._tag &&
-  (left.provenance._tag === "Observed" ||
-    (right.provenance._tag === "Retained" &&
-      left.provenance.reason === right.provenance.reason)) &&
-  left.sourceUpdatedAtMs === right.sourceUpdatedAtMs &&
-  left.observedAtMs === right.observedAtMs &&
-  left.commitSequence === right.commitSequence
 
 const SessionObservationCommitInput = Schema.Struct({
   recordedAtMs: DateTimestampMs,

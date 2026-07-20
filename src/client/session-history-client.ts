@@ -7,6 +7,7 @@ import {
 } from "../domain/session.js"
 import type { ClientOutputError } from "./session-client.js"
 import type { OneShotClientPort } from "./one-shot-session-client.js"
+import { escapeTerminalText, utcTimestamp } from "./terminal-text.js"
 
 export class SessionHistoryClientError extends Schema.TaggedErrorClass<SessionHistoryClientError>()(
   "PackWalk.SessionHistoryClientError",
@@ -17,17 +18,6 @@ export interface SessionHistoryClientOptions {
   readonly format: "text" | "json"
   readonly lineSeparator: string
 }
-
-const escapeTerminalText = (value: string): string =>
-  Array.from(value, (character) => {
-    if (character === "\\") return "\\\\"
-    const codePoint = character.codePointAt(0) ?? 0
-    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-      ? `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`
-      : character
-  }).join("")
-
-const utcTimestamp = (epochMs: number): string => new Date(epochMs).toISOString()
 
 const formatFact = (fact: SessionEvidenceFact): ReadonlyArray<string> => {
   const view = fact.view

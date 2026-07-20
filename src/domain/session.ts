@@ -324,7 +324,7 @@ export const SessionHistoryCursor = Schema.Struct({
 
 export interface SessionHistoryCursor extends Schema.Schema.Type<typeof SessionHistoryCursor> {}
 
-const sameSessionView = (left: SessionView, right: SessionView): boolean =>
+export const sameSessionView = (left: SessionView, right: SessionView): boolean =>
   left.protocolVersion === right.protocolVersion &&
   sameSessionIdentity(left.sessionId, right.sessionId) &&
   left.projectIdentity === right.projectIdentity &&

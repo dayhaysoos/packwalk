@@ -1,6 +1,7 @@
 import { Effect, Schema, Stream } from "effect"
 
 import type { SessionEvent, SessionView } from "../domain/session.js"
+import { escapeTerminalText, utcTimestamp } from "./terminal-text.js"
 
 export class ClientOutputError extends Schema.TaggedErrorClass<ClientOutputError>()(
   "PackWalk.ClientOutputError",
@@ -19,17 +20,6 @@ const sessionWidth = 38
 const evidenceWidth = 27
 const sourceUpdatedWidth = 26
 
-const escapeTerminalText = (value: string): string =>
-  Array.from(value, (character) => {
-    if (character === "\\") {
-      return "\\\\"
-    }
-    const codePoint = character.codePointAt(0) ?? 0
-    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-      ? `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`
-      : character
-  }).join("")
-
 const formatColumns = (
   columns: ReadonlyArray<readonly [value: string, width?: number]>,
 ): string =>
@@ -46,9 +36,6 @@ const projectName = (identity: string): string => {
   }
   return withoutTrailingSeparators.split(/[\\/]/u).at(-1) ?? identity
 }
-
-const utcTimestamp = (epochMs: number): string =>
-  new Date(epochMs).toISOString()
 
 interface SessionFrameFields {
   readonly project: string

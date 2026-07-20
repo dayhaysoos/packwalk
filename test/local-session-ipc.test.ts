@@ -15,17 +15,23 @@ import { Effect, Fiber, Result, Stream } from "effect"
 
 import {
   connectSessionEvents,
+  inspectSessionHistory,
   makeSessionEventServer,
   runSessionEventServer,
 } from "../src/adapters/local-session-ipc.js"
 import {
   MaximumSessionEventBytes,
   ProjectIdentity,
+  SessionEvidenceOrigin,
   SessionEvent,
+  SessionHistoryPage,
+  SessionHistoryUnavailable,
   SessionIdentity,
   SessionProvenance,
   SessionState,
   SessionView,
+  sessionHistoryOmittedContent,
+  sessionHistoryUnsupportedFacts,
 } from "../src/domain/session.js"
 
 const sessionId = "019f77d2-1a10-7cf0-b5df-76eebb4071ab"
@@ -85,6 +91,41 @@ const makeRawEventServer = (
               socket.write(chunk, () => setTimeout(() => send(index + 1), 5))
             }
             send(0)
+          })
+        })
+        server.once("close", () => {
+          for (const socket of sockets) socket.destroy()
+        })
+        const listening = once(server, "listening")
+        server.listen(endpoint)
+        await listening
+        return server
+      },
+      catch: effectError,
+    }),
+    closeServer,
+  )
+
+const makeSequentialRawServer = (
+  endpoint: string,
+  frames: ReadonlyArray<Uint8Array>,
+): Effect.Effect<Server, Error, import("effect").Scope.Scope> =>
+  Effect.acquireRelease(
+    Effect.tryPromise({
+      try: async () => {
+        const sockets = new Set<Socket>()
+        let connectionIndex = 0
+        const server = createServer((socket) => {
+          sockets.add(socket)
+          const frame = frames[connectionIndex]
+          connectionIndex += 1
+          socket.once("close", () => sockets.delete(socket))
+          socket.once("data", () => {
+            if (frame === undefined) {
+              socket.end()
+              return
+            }
+            socket.end(frame)
           })
         })
         server.once("close", () => {
@@ -223,6 +264,94 @@ it.effect("encodes and decodes the public session event stream across local IPC"
     expect(Array.from(yield* Fiber.join(received))).toEqual(
       Array.from(yield* Stream.runCollect(events)),
     )
+  }),
+)
+
+it.effect("rejects a crossed unavailable history response", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = makeEndpoint(directory)
+    const crossed = SessionHistoryUnavailable.make({
+      protocolVersion: 4,
+      sessionId: SessionIdentity.make("019f77d2-1a10-7cf0-b5df-76eebb4071ac"),
+      code: "session-not-found",
+      message: "PackWalk has no retained history for that exact session",
+    })
+    yield* makeSequentialRawServer(endpoint, [
+      Buffer.from(`${JSON.stringify(crossed)}\n`, "utf8"),
+    ])
+
+    const result = yield* Effect.scoped(
+      inspectSessionHistory(endpoint, SessionIdentity.make(sessionId)),
+    ).pipe(Effect.result)
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "PackWalk.LocalIpcError",
+        code: "invalid-frame",
+      })
+    }
+  }),
+)
+
+it.effect("rejects a crossed unavailable history continuation", () =>
+  Effect.gen(function* () {
+    const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
+    )
+    const endpoint = makeEndpoint(directory)
+    const explainedView = SessionView.make({
+      ...view,
+      state: SessionState.cases.Polled.make({}),
+      sourceUpdatedAtMs: 2_500,
+      observedAtMs: 3_000,
+      commitSequence: 2,
+    })
+    const firstPage = SessionHistoryPage.make({
+      protocolVersion: 4,
+      sessionId: SessionIdentity.make(sessionId),
+      explainedView,
+      historyCoverage: "complete",
+      omittedContent: sessionHistoryOmittedContent,
+      unsupportedFacts: sessionHistoryUnsupportedFacts,
+      facts: [{
+        factVersion: 1,
+        origin: SessionEvidenceOrigin.cases.Committed.make({
+          recordedAtMs: 2_000,
+        }),
+        view,
+      }],
+      afterCommitSequence: 0,
+      throughCommitSequence: 2,
+      nextAfterCommitSequence: 1,
+    })
+    const crossed = SessionHistoryUnavailable.make({
+      protocolVersion: 4,
+      sessionId: SessionIdentity.make("019f77d2-1a10-7cf0-b5df-76eebb4071ac"),
+      code: "invalid-history-cursor",
+      message: "PackWalk could not continue that retained session history query",
+    })
+    yield* makeSequentialRawServer(endpoint, [
+      Buffer.from(`${JSON.stringify(firstPage)}\n`, "utf8"),
+      Buffer.from(`${JSON.stringify(crossed)}\n`, "utf8"),
+    ])
+
+    const result = yield* Effect.scoped(
+      inspectSessionHistory(endpoint, SessionIdentity.make(sessionId)),
+    ).pipe(Effect.result)
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "PackWalk.LocalIpcError",
+        code: "invalid-frame",
+      })
+    }
   }),
 )
 
@@ -399,7 +528,7 @@ it.live("closes a malformed-command peer and continues serving", () =>
   }),
 )
 
-it.live("rejects a protocol-v2 subscription without emitting a v3 event", () =>
+it.live("rejects a protocol-v2 subscription without emitting a v4 event", () =>
   Effect.gen(function* () {
     const directory = mkdtempSync(join(tmpdir(), "packwalk-ipc-test-"))
     yield* Effect.addFinalizer(() =>
