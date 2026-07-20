@@ -50,3 +50,8 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   authority. The single `OneShot` branch also removes duplicated text/JSON
   output pipelines. Focused tests and typecheck are green; a fresh independent
   review is required after full verification.
+- 2026-07-20: After the corrections, full verification remained green at 17
+  files and 75 tests and the compiled public-command smoke passed again with a
+  real `POLLED` snapshot. Fresh generic review pass 2 is clean with zero
+  Standards and zero Specification findings. Ticket 03 now awaits independent
+  product preflight; no maintainer acceptance is claimed.

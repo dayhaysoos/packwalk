@@ -124,7 +124,9 @@ for both available one-shot forms and invalid-argument failure behavior.
 Generic review pass 1 found no Ticket 03 Specification issue and required two
 Standards corrections: CLI argv now passes through a strict Effect Schema, and
 one `OneShot { format }` command owns the shared text/JSON execution path. Those
-corrections are implemented and awaiting fresh review.
+corrections are implemented. Fresh generic review pass 2 is clean with zero
+Standards and zero Specification findings. Independent product preflight is the
+remaining delivery gate; no maintainer acceptance is claimed.
 
 ## Reproduce
 
