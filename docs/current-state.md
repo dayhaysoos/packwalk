@@ -45,11 +45,11 @@ client.
 ## Active acceptance issue
 
 [Ticket 01](../.scratch/packwalk-post-launch-orientation/issues/01-display-one-ordinary-running-codex-session.md)
-is in final agent review on `agent/ticket-01-acceptance`. The maintainer's
-failed demonstration was reproduced: a persistent daemon could remain pinned
-to an older singleton, and a cold restart then rejected a newly discovered
-identity. Separately, second-only CLI timestamps could render distinct
-subsecond polling commits identically.
+is ready for final maintainer acceptance on `agent/ticket-01-acceptance`. The
+maintainer's failed demonstration was reproduced: a persistent daemon could
+remain pinned to an older singleton, and a cold restart then rejected a newly
+discovered identity. Separately, second-only CLI timestamps could render
+distinct subsecond polling commits identically.
 
 Polling is not trustworthy live observation and should not be described as
 real-time attachment. It must nevertheless publish and visibly render a new
@@ -69,10 +69,14 @@ discovery or a source-lost poll before exact-identity polling resumes. The
 README now documents this same complete table and maintainer demonstration.
 The public daemon/IPC recovery test continues past `SessionUnavailable` through
 evidence restoration, reconnect, and a later exact-identity committed update.
-Deterministic verification (15 files, 65 tests) and a real
-cold-start-plus-reconnect exercise are green; fresh generic code review and
-independent product preflight remain before the issue can move to
-maintainer-only acceptance.
+Deterministic verification (15 files, 65 tests), the opt-in real-Codex check,
+and bounded cold-start-plus-reconnect exercises are green. Final generic review
+is clean with zero Standards and zero Ticket 01 specification findings.
+Independent product preflight reports `READY FOR MAINTAINER`. The real review
+terminal was cursor-disabled and correctly exercised complete appended frames;
+the capable 80-column in-place redraw remains deterministically covered. No
+known agent-verifiable blocker remains, and the maintainer's personal
+observation is intentionally still unchecked.
 
 ## Reproduce
 
@@ -121,10 +125,9 @@ does not redefine PackWalk as permanently read-only.
 
 ## Next work
 
-1. Complete fresh generic code review and independent product preflight for
-   Ticket 01, fixing and re-reviewing every blocker.
-2. Have the maintainer personally rerun the repository command.
-3. Only after Ticket 01 resolves, begin the bounded Ticket 02 live-event
+1. Have the maintainer personally rerun the repository command and provide
+   subjective feedback on the visible result.
+2. Only after Ticket 01 resolves, begin the bounded Ticket 02 live-event
    experiment.
 
 ## Fresh-agent comprehension check
@@ -141,9 +144,9 @@ following without inspecting old commits or another checkout:
    session lifecycle or start idle work.
 5. Remote web, mobile, and cross-device supervision is a bonus horizon after
    the successful local core, not a current blocker.
-6. Ticket 01's agent-verifiable implementation is complete on its acceptance
-   branch, but required review gates and the maintainer's personal real-product
-   observation remain before resolution.
+6. Ticket 01's implementation and agent review gates are complete on its
+   acceptance branch, but the maintainer's personal real-product observation
+   remains before resolution.
 
 An answer that defines PackWalk as a permanently read-only viewer, revives a
 wrapper or relay, grants the routing model action authority, or treats remote

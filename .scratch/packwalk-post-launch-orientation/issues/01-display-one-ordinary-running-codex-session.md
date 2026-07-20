@@ -1,6 +1,6 @@
 # Display one ordinary running Codex session
 
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: none
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -109,3 +109,13 @@ repository-local execution of the package binary is required.
   same session, and a later committed `SessionUpdated` after polling resumes.
   `npm run verify` remains green; a fresh full-branch review is required before
   product preflight.
+- 2026-07-19: Final generic review pass 4 is clean with zero Standards findings
+  and zero Ticket 01 specification findings. Independent product preflight is
+  `READY FOR MAINTAINER`: `npm run verify` passed 15 files and 65 tests,
+  `npm run test:real-codex` passed, and bounded cold-start and reconnect runs
+  both rendered the same exact session with later millisecond `SOURCE UPDATED`
+  values. The real review terminal was cursor-disabled and correctly exercised
+  the append-only fallback; deterministic coverage proves the six-line redraw
+  for a capable 80-column terminal. No agent-verifiable blocker remains. Only
+  the maintainer's personal test and subjective visual feedback remain, so the
+  personal acceptance criterion stays unchecked.
