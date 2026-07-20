@@ -94,3 +94,13 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   deadline race clears its timer in `finally` for both product commands and
   cleanup helpers. Focused tests, typecheck, and lint are green; full
   verification and a fresh review remain required.
+- 2026-07-20: Generic review pass 6 remained clean on Specification and found
+  two Standards gaps in the test harness: the timeout regression observed only
+  the process-tree owner rather than its descendant, and process supervision
+  made the product-output test span unrelated responsibilities. Process
+  supervision now lives in a cohesive test support module. The timeout fixture
+  publishes its disposable descendant identity, and the regression
+  independently proves that descendant no longer exists after cleanup; that
+  identity is not retained in delivery records. The two focused process tests
+  are green, and full verification passes 18 files and 76 tests plus typecheck,
+  lint, and build. A fresh independent review remains required.

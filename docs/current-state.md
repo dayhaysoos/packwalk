@@ -148,6 +148,14 @@ tree even if its owner exits and required losing deadline timers to be cleared.
 The shared deadline helper now clears every timer, and Windows cleanup always
 checks `/T`, escalates to `/F`, and fails visibly without proof. Full
 verification and another fresh review remain required.
+Generic review pass 6 remained clean on Ticket 03 Specification and found that
+the cleanup regression did not independently observe its disposable descendant
+and that process supervision overburdened the product-output test. The bounded
+runner is now a cohesive test support module, while a dedicated regression
+captures the fixture descendant identity and proves that process is gone after
+cleanup. Focused process tests are green, and full verification passes 18 files
+and 76 tests plus typecheck, lint, and build. Another fresh independent review
+remains required.
 
 ## Reproduce
 
