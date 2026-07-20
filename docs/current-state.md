@@ -689,6 +689,18 @@ Evidence history, deletion, generic migration/backup recovery,
 contention handling, native three-platform qualification, live attachment,
 intervention, and routing remain outside Ticket 05.
 
+[Ticket 06](../.scratch/packwalk-post-launch-orientation/issues/06-inspect-content-free-evidence-history.md)
+is claimed on `agent/ticket-06-content-free-history` from fixed integration
+point `0816410ea854b3a829ac49ee62826b58cc4174c4`. Its acceptance map requires an
+exact-session history query through the daemon, IPC, and plain CLI; durable
+content-free observations that explain the current projection; schema-level
+rejection of prompts, responses, output, diffs, terminal input, and raw
+payloads; causal ordering by PackWalk commit sequence rather than timestamps;
+and deterministic Windows/macOS/Linux encoding, timestamp, and path behavior.
+Deletion, generic migration recovery, contention, native platform
+qualification, live attachment, intervention, routing, and searchable
+transcript history remain outside Ticket 06.
+
 ## Reproduce
 
 Use the exact versions pinned by the repository:
