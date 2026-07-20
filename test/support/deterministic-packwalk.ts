@@ -43,6 +43,7 @@ export interface DeterministicPackWalk {
     fact: unknown,
   ) => Effect.Effect<void>
   readonly loseSourceForTest: Effect.Effect<void>
+  readonly restoreSourceForTest: Effect.Effect<void>
 }
 
 export interface DeterministicPackWalkOptions {
@@ -76,21 +77,22 @@ export const makeDeterministicPackWalk = (
       return yield* Ref.get(factRef).pipe(Effect.flatMap(decodeFact))
     })
 
+    const readAvailable = Effect.fn("SessionSource.Test.readAvailable")(
+      function* () {
+        const available = yield* Ref.get(sourceAvailable)
+        if (!available) {
+          return yield* new SessionSourceError({
+            code: "unavailable",
+            message: "Codex persisted evidence is unavailable",
+          })
+        }
+        return yield* read()
+      },
+    )
+
     const source: SessionSourceInterface = {
-      discover: read,
-      poll: () =>
-        Ref.get(sourceAvailable).pipe(
-          Effect.flatMap((available) =>
-            available
-              ? read()
-              : Effect.fail(
-                  new SessionSourceError({
-                    code: "unavailable",
-                    message: "Codex persisted evidence is unavailable",
-                  }),
-                ),
-          ),
-        ),
+      discover: readAvailable,
+      poll: readAvailable,
     }
 
     const sourceLayer = Layer.succeed(SessionSource, SessionSource.of(source))
@@ -163,5 +165,6 @@ export const makeDeterministicPackWalk = (
       persistSourceIdentityForTest,
       persistSourceFactForTest: (fact) => Ref.set(factRef, fact),
       loseSourceForTest: Ref.set(sourceAvailable, false),
+      restoreSourceForTest: Ref.set(sourceAvailable, true),
     }
   })

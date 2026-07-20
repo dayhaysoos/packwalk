@@ -102,3 +102,10 @@ repository-local execution of the package binary is required.
   cover both recovery cases, and the README now carries the same exact
   maintainer demonstration as this ticket and `docs/current-state.md`. Full
   verification is green; fresh generic review remains in progress.
+- 2026-07-19: Review pass 3 was standards-clean and found one remaining spec
+  evidence gap: the source-loss test stopped at `SessionUnavailable`. The
+  public daemon/IPC test now proves initial snapshot, failed exact-identity
+  poll, typed unavailable event, restored evidence, reconnect snapshot for the
+  same session, and a later committed `SessionUpdated` after polling resumes.
+  `npm run verify` remains green; a fresh full-branch review is required before
+  product preflight.

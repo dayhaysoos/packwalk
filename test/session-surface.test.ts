@@ -390,7 +390,7 @@ it.effect("does not publish a session update when its authoritative commit fails
   }),
 )
 
-it.effect("publishes a typed unavailable event when polling loses its source", () =>
+it.effect("recovers a source-lost poll on reconnect and resumes exact-identity polling", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(2_000)
 
@@ -419,6 +419,46 @@ it.effect("publishes a typed unavailable event when polling loses its source", (
       protocolVersion: 1,
       code: "source-unavailable",
       message: "PackWalk could not read supported Codex persisted evidence",
+    })
+
+    yield* packWalk.restoreSourceForTest
+    const recoveredObserved = yield* Deferred.make<void>()
+    const recovered = yield* packWalk.events.pipe(
+      Stream.tap((event) =>
+        event._tag === "SessionSnapshot"
+          ? Deferred.succeed(recoveredObserved, undefined)
+          : Effect.void,
+      ),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkChild,
+    )
+
+    yield* Deferred.await(recoveredObserved)
+    yield* packWalk.persistSourceUpdate({ sourceUpdatedAtMs: 2_500 })
+    yield* TestClock.adjust("1 second")
+
+    const recoveredEvents = Array.from(yield* Fiber.join(recovered))
+    expect(recoveredEvents[0]).toMatchObject({
+      _tag: "SessionSnapshot",
+      view: {
+        sessionId,
+        projectIdentity: "fixture-project",
+        state: { _tag: "Discovered" },
+        sourceUpdatedAtMs: 1_000,
+        commitSequence: 1,
+      },
+    })
+    expect(recoveredEvents[1]).toMatchObject({
+      _tag: "SessionUpdated",
+      view: {
+        sessionId,
+        projectIdentity: "fixture-project",
+        state: { _tag: "Polled" },
+        sourceUpdatedAtMs: 2_500,
+        observedAtMs: 4_000,
+        commitSequence: 2,
+      },
     })
   }),
 )
