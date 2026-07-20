@@ -156,6 +156,15 @@ captures the fixture descendant identity and proves that process is gone after
 cleanup. Focused process tests are green, and full verification passes 18 files
 and 76 tests plus typecheck, lint, and build. Another fresh independent review
 remains required.
+Generic review pass 7 is clean on Standards and found that the cross-platform
+regression selected `npm.cmd` on Windows but attempted to spawn that command
+shim without a shell, preventing the Windows contract from being exercised.
+The regression now executes npm's JavaScript entry point with the current Node
+executable and argument array, retaining the exact quiet npm-script semantics
+without shell quoting. A pure Windows-path invocation regression first failed
+against the old direct-shim plan. Three focused tests are green; full
+verification passes 19 files and 77 tests plus typecheck, lint, and build.
+Another fresh independent review remains required.
 
 ## Reproduce
 

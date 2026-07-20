@@ -104,3 +104,13 @@ refreshing CLI, suitable for scrollback, accessibility, and automation.
   identity is not retained in delivery records. The two focused process tests
   are green, and full verification passes 18 files and 76 tests plus typecheck,
   lint, and build. A fresh independent review remains required.
+- 2026-07-20: Generic review pass 7 is clean on Standards and found one
+  Specification blocker in the regression rather than the product: Windows
+  cannot directly spawn the selected `npm.cmd` shim without a shell, so that
+  platform would fail before asserting one-shot streams and exit behavior. A
+  red-capable pure invocation test now locks in Windows-style paths with spaces.
+  The documented npm wrapper is executed through the current Node executable
+  and npm's JavaScript entry point, preserving `run --silent packwalk --` while
+  avoiding shell quoting and direct command-shim execution. Three focused tests
+  are green; full verification passes 19 files and 77 tests plus typecheck,
+  lint, and build. Another fresh review remains required.

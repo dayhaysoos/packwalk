@@ -21,6 +21,7 @@ import {
   terminateActiveProcessTrees,
   type ProcessResult,
 } from "./support/bounded-process.js"
+import { createNpmRunInvocation } from "./support/npm-invocation.js"
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
 const commandTimeoutMs = 30_000
@@ -29,15 +30,25 @@ const runDocumentedPackWalk = (
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv,
   activeChildren: Set<ChildProcess>,
-): Promise<ProcessResult> =>
-  runBoundedCommand({
-    command: process.platform === "win32" ? "npm.cmd" : "npm",
-    args: ["run", "--silent", "packwalk", "--", ...args],
+): Promise<ProcessResult> => {
+  const npmEntryPoint = process.env.npm_execpath
+  if (npmEntryPoint === undefined || npmEntryPoint.length === 0) {
+    throw new Error("PackWalk process test requires npm_execpath")
+  }
+  const invocation = createNpmRunInvocation({
+    nodeExecutable: process.execPath,
+    npmEntryPoint,
+    script: "packwalk",
+    args,
+  })
+  return runBoundedCommand({
+    ...invocation,
     cwd: repositoryRoot,
     environment,
     activeChildren,
     timeoutMs: commandTimeoutMs,
   })
+}
 
 const closeServer = async (
   server: Server,
