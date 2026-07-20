@@ -103,22 +103,54 @@ const waitForExit = async (
   })
 }
 
-const processGroupExists = (pid: number): boolean => {
-  try {
-    process.kill(-pid, 0)
-    return true
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ESRCH"
-    ) {
-      return false
-    }
-    throw error
-  }
+type PosixProcessGroupKill = (
+  pid: number,
+  signal: number | NodeJS.Signals,
+) => boolean
+
+interface PosixProcessGroupControl {
+  readonly exists: (pid: number) => boolean
+  readonly signal: (
+    pid: number,
+    signal: "SIGTERM" | "SIGKILL",
+  ) => void
 }
+
+const hasErrorCode = (error: unknown, code: string): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  error.code === code
+
+const makePosixProcessGroupControl = (
+  kill: PosixProcessGroupKill,
+): PosixProcessGroupControl => ({
+  exists: (pid) => {
+    try {
+      kill(-pid, 0)
+      return true
+    } catch (error) {
+      if (hasErrorCode(error, "ESRCH")) return false
+      // EPERM proves the group still exists, not that cleanup failed.
+      if (hasErrorCode(error, "EPERM")) return true
+      throw error
+    }
+  },
+  signal: (pid, signal) => {
+    try {
+      kill(-pid, signal)
+    } catch (error) {
+      if (hasErrorCode(error, "ESRCH")) return
+      // Keep an indeterminate group under the bounded exit check below.
+      if (hasErrorCode(error, "EPERM")) return
+      throw error
+    }
+  },
+})
+
+const nativePosixProcessGroup = makePosixProcessGroupControl(
+  (pid, signal) => process.kill(pid, signal),
+)
 
 const waitForProcessGroupExit = async (
   pid: number,
@@ -126,29 +158,10 @@ const waitForProcessGroupExit = async (
 ): Promise<boolean> => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (!processGroupExists(pid)) return true
+    if (!nativePosixProcessGroup.exists(pid)) return true
     await delay(25)
   }
-  return !processGroupExists(pid)
-}
-
-const signalProcessGroup = (
-  pid: number,
-  signal: "SIGTERM" | "SIGKILL",
-): void => {
-  try {
-    process.kill(-pid, signal)
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ESRCH"
-    ) {
-      return
-    }
-    throw error
-  }
+  return !nativePosixProcessGroup.exists(pid)
 }
 
 interface TaskkillResult {
@@ -215,9 +228,9 @@ const terminatePosixProcessTree = async (
   child: ChildProcess,
   pid: number,
 ): Promise<void> => {
-  signalProcessGroup(pid, "SIGTERM")
+  nativePosixProcessGroup.signal(pid, "SIGTERM")
   if (!(await waitForProcessGroupExit(pid, gracefulKillWaitMs))) {
-    signalProcessGroup(pid, "SIGKILL")
+    nativePosixProcessGroup.signal(pid, "SIGKILL")
     if (!(await waitForProcessGroupExit(pid, forceKillWaitMs))) {
       throw new Error("POSIX process tree did not exit after SIGKILL")
     }

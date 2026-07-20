@@ -519,3 +519,24 @@ sessions overlap, share a repository, or have duplicate display labels.
   host-selected native tests, retained writer election, transport truth, and
   crash-successor reopening. Ticket 04 remains claimed only while the
   independent product preflight runs; no maintainer acceptance is claimed.
+- 2026-07-20: Independent product preflight reports `NOT READY` on exact head
+  `4220c91bbeaec8fda653aecf44c22ec6216db3d3`. Every Ticket 04 product outcome
+  passed through focused public daemon/IPC/CLI tests, installed text and JSON
+  returned 19 distinct exact identities, the real persisted-Codex check
+  passed, and v1 PID 77857 remained untouched. The required `npm run verify`
+  command nevertheless failed twice under the configured four-worker suite
+  with `kill EPERM` in the disposable POSIX process-tree cleanup; the same
+  test passes alone and the complete suite passes serially. This
+  concurrency-sensitive verification failure is the active acceptance blocker
+  and must be diagnosed and repaired before fresh generic review and preflight.
+- 2026-07-20: The preflight verification blocker is repaired with a
+  deterministic red-first POSIX process-group regression. A group-signal
+  `EPERM` is now treated as indeterminate rather than immediate cleanup
+  failure: the helper keeps the group under bounded exit verification,
+  escalates from `SIGTERM` to `SIGKILL`, and still fails unless the group is
+  proven absent. The real regression forces the first detached-group signal to
+  return `EPERM` and proves both fixture owner and descendant disappear with no
+  active child retained. Focused process tests pass, and `npm run verify`
+  passes 22 files, 148 tests, and one intentional host-policy skip plus
+  typecheck, lint, and build. Ticket 04 remains claimed for a wholly fresh
+  generic review and fresh independent product preflight.

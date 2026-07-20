@@ -243,10 +243,11 @@ After storage election, any endpoint bind failure is transport unavailable; an
 accepting listener is not treated as evidence of a healthy daemon. The repaired
 candidate crosses a two-session Codex SQLite fixture through the real daemon
 and local IPC seam into the CLI formatter. `npm run verify` passes 22 files,
-147 tests, and one intentional host-policy branch skip plus typecheck, lint,
-and build; the opt-in persisted-Codex check passes in 8.24 seconds. Pass 12's
-code and handoff blockers are repaired, but a wholly fresh generic review and
-independent product preflight remain required.
+148 tests, and one intentional host-policy branch skip plus typecheck, lint,
+and build; the opt-in persisted-Codex check passes in 29.19 seconds. Generic
+review pass 13 is clean, and the first product-preflight verification blocker
+is repaired with a deterministic bounded process-group regression. A wholly
+fresh generic review and independent product preflight remain required.
 
 ### Ticket 04 delivery chronology
 
@@ -577,6 +578,25 @@ integration point `31874ccd66c61d1ff49ef38ef77db1f4afcaf5f8` through
 Specification reviewers report zero actionable findings, and the separate
 storage/platform audit reports zero blockers. Ticket 04 remains claimed only
 while independent product preflight runs; no maintainer acceptance is claimed.
+Independent product preflight on exact head
+`4220c91bbeaec8fda653aecf44c22ec6216db3d3` reports `NOT READY` solely because
+the required four-worker `npm run verify` command failed twice with `kill
+EPERM` in disposable POSIX process-tree cleanup. Every Ticket 04 product
+outcome, focused public daemon/IPC/CLI suite, installed text/JSON path, and the
+real persisted-Codex check passed; the same cleanup test passes alone and the
+complete deterministic suite passes serially. Ticket 04 remains claimed while
+that concurrency-sensitive verification blocker is diagnosed and repaired,
+then must return through full verification, fresh generic review, and fresh
+independent preflight.
+The preflight blocker is repaired red-first. POSIX group-signal `EPERM` now
+keeps cleanup under bounded exit verification rather than aborting before that
+proof; escalation still fails unless the group becomes absent. A real
+regression forces the first detached-group signal to return `EPERM` and proves
+both fixture owner and descendant disappear with no retained active child.
+Focused process tests pass, and `npm run verify` passes 22 files, 148 tests,
+and one intentional host-policy skip plus typecheck, lint, and build. Ticket 04
+remains claimed for a wholly fresh generic review and fresh independent
+product preflight.
 Ticket 05's stale/degraded recovery semantics, evidence history, deletion,
 live attachment, intervention, and routing remain outside Ticket 04, and no
 maintainer acceptance is claimed.
