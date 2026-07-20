@@ -619,7 +619,7 @@ live attachment, intervention, and routing remain outside Ticket 04, and no
 maintainer acceptance is claimed.
 
 [Ticket 05](../.scratch/packwalk-post-launch-orientation/issues/05-restore-and-degrade-the-overview-safely.md)
-is claimed on `agent/ticket-05-safe-restoration` from fixed integration point
+is resolved on `agent/ticket-05-safe-restoration` from fixed integration point
 `ef6ed5074b6a039ae7ced76e50508405c82f338e`. The first fresh generic review's
 three Standards findings and two Specification findings are fixed. The second
 fresh review's three Standards smells and one Specification blocker are also
@@ -631,8 +631,11 @@ its pinned migration checksum unchanged. The fifth fresh whole-branch review
 returned zero actionable Standards findings and zero actionable Specification
 findings. The first independent product preflight then returned `NOT READY`
 solely because whole-source loss/recovery and retained one-shot JSON lacked one
-public-seam proof. That deterministic evidence blocker is fixed; fresh generic
-review and a fresh independent product preflight remain pending.
+public-seam proof. That deterministic evidence blocker is fixed. The final
+post-fix generic review returned zero actionable Standards findings and zero
+actionable Specification findings, and a new independent product preflight
+returned `READY FOR MAINTAINER`. No agent-verifiable or required human-evidence
+blocker remains; this does not claim the maintainer's personal acceptance.
 
 `SessionView` v2 now makes freshness and provenance an explicit closed pair:
 accepted evidence is `fresh`/`Observed`, while last-supported metadata is
@@ -680,6 +683,8 @@ persisted source without starting, resuming, or changing a Codex session.
 The focused nine-file public lifecycle/storage/IPC/CLI suite passes 129 tests,
 including two-session whole-source loss, repeated loss, same-fact recovery,
 reconnect without replay, and actual retained/recovered one-shot JSON.
+Disposable compiled text/JSON and real local IPC product paths were clean. The
+pre-existing protocol-v1 daemon PID 77857 remained alive and untouched.
 Evidence history, deletion, generic migration/backup recovery,
 contention handling, native three-platform qualification, live attachment,
 intervention, and routing remain outside Ticket 05.

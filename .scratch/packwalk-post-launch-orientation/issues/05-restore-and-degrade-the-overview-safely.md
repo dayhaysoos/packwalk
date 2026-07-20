@@ -1,6 +1,6 @@
 # Restore and degrade the overview safely
 
-Status: claimed
+Status: resolved
 Blocked by: 01
 Spec: [PackWalk post-launch session orientation](../spec.md)
 
@@ -108,3 +108,14 @@ observed.
   The nine-file focused public suite passes 129 tests; full verification passes
   157 tests plus one intentional skip; the installed-Codex test remains green.
   Fresh generic review and a fresh independent preflight are required.
+- 2026-07-20: Final post-fix generic review returned zero actionable Standards
+  findings and zero actionable Specification findings. A new independent
+  product preflight returned `READY FOR MAINTAINER`: `npm run verify` passed 22
+  files and 157 tests with one intentional host-policy skip; the focused
+  nine-file public suite passed 129/129; the repaired regression passed alone;
+  and the read-only installed-Codex test passed 1/1. Disposable compiled
+  text/JSON and real local IPC paths were clean. PID 77857 remained alive and
+  untouched. No required human evidence or Ticket 05 blocker remains. This
+  resolves the agent-verifiable ticket without claiming the maintainer's
+  personal acceptance; visual hierarchy remains the separate readability
+  slice and native Windows/Linux execution remains Ticket 10.
